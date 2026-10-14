@@ -1,0 +1,159 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >-
+  마음장부 정적 사이트 — S3 + CloudFront + Route 53 (heartledger.alicework.kr).
+  인증서는 us-east-1 에만 만들 수 있어서 이 스택은 us-east-1 에 올린다.
+  1단계: DomainReady=false 로 배포 → 네임서버를 가비아에서 AWS 로 바꾼다
+  2단계: DomainReady=true 로 다시 배포 → 인증서 발급 + 도메인 연결
+
+Parameters:
+  ZoneName:
+    Type: String
+    Default: alicework.kr
+    Description: 가비아에서 산 도메인. Route 53 호스팅 영역 이름
+  DomainName:
+    Type: String
+    Default: heartledger.alicework.kr
+    Description: 사이트 주소 (ZoneName 의 서브도메인)
+  DomainReady:
+    Type: String
+    Default: "false"
+    AllowedValues: ["true", "false"]
+    Description: 네임서버가 Route 53 로 바뀐 뒤 true
+
+Conditions:
+  Ready: !Equals [!Ref DomainReady, "true"]
+
+Resources:
+  HostedZone:
+    Type: AWS::Route53::HostedZone
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      Name: !Ref ZoneName
+      HostedZoneConfig:
+        Comment: alice 프로젝트들 (가비아에서 산 도메인, DNS 만 여기서)
+
+  Bucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      BucketName: !Sub "maeum-site-${AWS::AccountId}"
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+
+  OAC:
+    Type: AWS::CloudFront::OriginAccessControl
+    Properties:
+      OriginAccessControlConfig:
+        Name: !Sub "maeum-site-${AWS::AccountId}"
+        OriginAccessControlOriginType: s3
+        SigningBehavior: always
+        SigningProtocol: sigv4
+
+  Certificate:
+    Type: AWS::CertificateManager::Certificate
+    Condition: Ready
+    Properties:
+      DomainName: !Ref DomainName
+      ValidationMethod: DNS
+      DomainValidationOptions:
+        - DomainName: !Ref DomainName
+          HostedZoneId: !Ref HostedZone
+
+  Distribution:
+    Type: AWS::CloudFront::Distribution
+    Properties:
+      DistributionConfig:
+        Enabled: true
+        Comment: 마음장부
+        DefaultRootObject: index.html
+        HttpVersion: http2and3
+        IPV6Enabled: true
+        PriceClass: PriceClass_200
+        Aliases: !If [Ready, [!Ref DomainName], !Ref AWS::NoValue]
+        ViewerCertificate: !If
+          - Ready
+          - AcmCertificateArn: !Ref Certificate
+            SslSupportMethod: sni-only
+            MinimumProtocolVersion: TLSv1.2_2021
+          - CloudFrontDefaultCertificate: true
+        Origins:
+          - Id: s3
+            DomainName: !GetAtt Bucket.RegionalDomainName
+            OriginAccessControlId: !GetAtt OAC.Id
+            S3OriginConfig:
+              OriginAccessIdentity: ""
+        DefaultCacheBehavior:
+          TargetOriginId: s3
+          ViewerProtocolPolicy: redirect-to-https
+          AllowedMethods: [GET, HEAD]
+          CachedMethods: [GET, HEAD]
+          Compress: true
+          # 관리형 정책 CachingOptimized
+          CachePolicyId: 658327ea-f89d-4fab-a63d-7e88639e58f6
+        CustomErrorResponses:
+          - ErrorCode: 403
+            ResponseCode: 404
+            ResponsePagePath: /404.html
+            ErrorCachingMinTTL: 10
+          - ErrorCode: 404
+            ResponseCode: 404
+            ResponsePagePath: /404.html
+            ErrorCachingMinTTL: 10
+
+  BucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref Bucket
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: cloudfront.amazonaws.com
+            Action: s3:GetObject
+            Resource: !Sub "${Bucket.Arn}/*"
+            Condition:
+              StringEquals:
+                AWS:SourceArn: !Sub "arn:aws:cloudfront::${AWS::AccountId}:distribution/${Distribution}"
+
+  SiteA:
+    Type: AWS::Route53::RecordSet
+    Condition: Ready
+    Properties:
+      HostedZoneId: !Ref HostedZone
+      Name: !Ref DomainName
+      Type: A
+      AliasTarget:
+        DNSName: !GetAtt Distribution.DomainName
+        HostedZoneId: Z2FDTNDATAQYW2
+  SiteAAAA:
+    Type: AWS::Route53::RecordSet
+    Condition: Ready
+    Properties:
+      HostedZoneId: !Ref HostedZone
+      Name: !Ref DomainName
+      Type: AAAA
+      AliasTarget:
+        DNSName: !GetAtt Distribution.DomainName
+        HostedZoneId: Z2FDTNDATAQYW2
+Outputs:
+  NameServers:
+    Description: 가비아 네임서버 설정에 넣을 주소 4개
+    Value: !Join [", ", !GetAtt HostedZone.NameServers]
+  BucketName:
+    Value: !Ref Bucket
+  DistributionId:
+    Value: !Ref Distribution
+  DistributionDomain:
+    Value: !GetAtt Distribution.DomainName
+  SiteUrl:
+    Value: !If [Ready, !Sub "https://${DomainName}", !Sub "https://${Distribution.DomainName}"]

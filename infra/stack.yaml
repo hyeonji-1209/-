@@ -1,0 +1,196 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >-
+  마음장부 — Cognito 로그인(이메일+비밀번호, 카카오 선택) + DynamoDB 한 테이블.
+  배포: aws cloudformation deploy --template-file infra/stack.yaml --stack-name maeum-ledger
+        --capabilities CAPABILITY_IAM --profile personal --region ap-northeast-2
+
+Parameters:
+  CallbackUrls:
+    Type: CommaDelimitedList
+    Default: "http://localhost:3000/"
+    Description: 카카오 로그인 뒤 돌아올 주소들 (배포 주소가 생기면 추가)
+  LogoutUrls:
+    Type: CommaDelimitedList
+    Default: "http://localhost:3000/"
+  KakaoClientId:
+    Type: String
+    Default: ""
+    Description: 카카오 개발자 콘솔의 REST API 키. 비우면 카카오 로그인은 꺼진다.
+  KakaoClientSecret:
+    Type: String
+    Default: ""
+    NoEcho: true
+    Description: 카카오 개발자 콘솔 > 보안 > Client Secret
+
+Conditions:
+  HasKakao: !Not [!Equals [!Ref KakaoClientId, ""]]
+
+Resources:
+  # ── 로그인 ──────────────────────────────────────────
+  UserPool:
+    Type: AWS::Cognito::UserPool
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      UserPoolName: maeum-ledger
+      UsernameAttributes: [email]
+      AutoVerifiedAttributes: [email]
+      UsernameConfiguration:
+        CaseSensitive: false
+      DeletionProtection: ACTIVE
+      Schema:
+        - Name: email
+          Required: true
+          Mutable: true
+      Policies:
+        PasswordPolicy:
+          MinimumLength: 8
+          RequireLowercase: false
+          RequireUppercase: false
+          RequireNumbers: false
+          RequireSymbols: false
+      AccountRecoverySetting:
+        RecoveryMechanisms:
+          - Name: verified_email
+            Priority: 1
+      EmailConfiguration:
+        EmailSendingAccount: COGNITO_DEFAULT
+      VerificationMessageTemplate:
+        DefaultEmailOption: CONFIRM_WITH_CODE
+        EmailSubject: "[마음장부] 인증번호"
+        EmailMessage: "마음장부 인증번호는 {####} 입니다."
+      AdminCreateUserConfig:
+        AllowAdminCreateUserOnly: false
+
+  KakaoProvider:
+    Type: AWS::Cognito::UserPoolIdentityProvider
+    Condition: HasKakao
+    Properties:
+      UserPoolId: !Ref UserPool
+      ProviderName: Kakao
+      ProviderType: OIDC
+      ProviderDetails:
+        client_id: !Ref KakaoClientId
+        client_secret: !Ref KakaoClientSecret
+        authorize_scopes: "openid account_email profile_nickname"
+        attributes_request_method: GET
+        oidc_issuer: https://kauth.kakao.com
+      AttributeMapping:
+        email: email
+        username: sub
+
+  UserPoolClient:
+    Type: AWS::Cognito::UserPoolClient
+    Properties:
+      ClientName: web
+      UserPoolId: !Ref UserPool
+      GenerateSecret: false
+      PreventUserExistenceErrors: ENABLED
+      ExplicitAuthFlows:
+        - ALLOW_USER_SRP_AUTH
+        - ALLOW_REFRESH_TOKEN_AUTH
+      SupportedIdentityProviders: !If [HasKakao, [COGNITO, !Ref KakaoProvider], [COGNITO]]
+      AllowedOAuthFlowsUserPoolClient: true
+      AllowedOAuthFlows: [code]
+      AllowedOAuthScopes: [openid, email, profile, aws.cognito.signin.user.admin]
+      CallbackURLs: !Ref CallbackUrls
+      LogoutURLs: !Ref LogoutUrls
+      TokenValidityUnits:
+        RefreshToken: days
+      RefreshTokenValidity: 90
+
+  UserPoolDomain:
+    Type: AWS::Cognito::UserPoolDomain
+    Properties:
+      Domain: !Sub "maeum-${AWS::AccountId}"
+      UserPoolId: !Ref UserPool
+
+  IdentityPool:
+    Type: AWS::Cognito::IdentityPool
+    Properties:
+      IdentityPoolName: maeum_ledger
+      AllowUnauthenticatedIdentities: false
+      CognitoIdentityProviders:
+        - ClientId: !Ref UserPoolClient
+          ProviderName: !GetAtt UserPool.ProviderName
+
+  # ── 데이터 ──────────────────────────────────────────
+  Table:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      TableName: maeum-ledger
+      BillingMode: PAY_PER_REQUEST
+      DeletionProtectionEnabled: true
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      AttributeDefinitions:
+        - AttributeName: pk
+          AttributeType: S
+        - AttributeName: sk
+          AttributeType: S
+      KeySchema:
+        - AttributeName: pk
+          KeyType: HASH
+        - AttributeName: sk
+          KeyType: RANGE
+
+  # 로그인한 사람은 자기 pk(아이덴티티 ID) 아래 항목만 읽고 쓸 수 있다
+  AuthRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Federated: cognito-identity.amazonaws.com
+            Action: sts:AssumeRoleWithWebIdentity
+            Condition:
+              StringEquals:
+                cognito-identity.amazonaws.com:aud: !Ref IdentityPool
+              ForAnyValue:StringLike:
+                cognito-identity.amazonaws.com:amr: authenticated
+      Policies:
+        - PolicyName: own-rows-only
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - dynamodb:GetItem
+                  - dynamodb:PutItem
+                  - dynamodb:UpdateItem
+                  - dynamodb:DeleteItem
+                  - dynamodb:Query
+                  - dynamodb:BatchGetItem
+                  - dynamodb:BatchWriteItem
+                Resource: !GetAtt Table.Arn
+                Condition:
+                  ForAllValues:StringEquals:
+                    dynamodb:LeadingKeys:
+                      - "${cognito-identity.amazonaws.com:sub}"
+
+  RoleAttachment:
+    Type: AWS::Cognito::IdentityPoolRoleAttachment
+    Properties:
+      IdentityPoolId: !Ref IdentityPool
+      Roles:
+        authenticated: !GetAtt AuthRole.Arn
+
+Outputs:
+  Region:
+    Value: !Ref AWS::Region
+  UserPoolId:
+    Value: !Ref UserPool
+  UserPoolClientId:
+    Value: !Ref UserPoolClient
+  IdentityPoolId:
+    Value: !Ref IdentityPool
+  TableName:
+    Value: !Ref Table
+  AuthDomain:
+    Value: !Sub "maeum-${AWS::AccountId}.auth.${AWS::Region}.amazoncognito.com"
+  KakaoEnabled:
+    Value: !If [HasKakao, "1", "0"]
