@@ -1,6 +1,6 @@
 AWSTemplateFormatVersion: "2010-09-09"
 Description: >-
-  마음장부 — Cognito 로그인(이메일+비밀번호, 카카오 선택) + DynamoDB 한 테이블.
+  마음장부 — Cognito 소셜 로그인(카카오·Google) + DynamoDB 한 테이블. 아이디·비밀번호·이메일은 받지 않는다.
   배포: aws cloudformation deploy --template-file infra/stack.yaml --stack-name maeum-ledger
         --capabilities CAPABILITY_IAM --profile personal --region ap-northeast-2
 
@@ -43,8 +43,8 @@ Conditions:
 
 Resources:
   # ── 로그인 ──────────────────────────────────────────
-  # v3: 아이디(자유 문자열) + 비밀번호. 이메일을 받지 않으므로 가입 즉시 확정(PreSignUp 람다)하고,
-  # 비밀번호 분실은 관리자가 admin-set-user-password 로 처리한다.
+  # v3: 소셜 로그인 전용. 사용자는 카카오·Google 로 들어올 때 자동으로 만들어진다.
+  # 앱 클라이언트에서 COGNITO 제공자와 비밀번호 인증 흐름을 빼서 아이디·비밀번호 가입 경로는 닫아 두었다.
   UserPoolV3:
     Type: AWS::Cognito::UserPool
     DeletionPolicy: Retain
@@ -71,43 +71,6 @@ Resources:
             Priority: 1
       AdminCreateUserConfig:
         AllowAdminCreateUserOnly: false
-      LambdaConfig:
-        PreSignUp: !GetAtt AutoConfirmFn.Arn
-
-  AutoConfirmRole:
-    Type: AWS::IAM::Role
-    Properties:
-      AssumeRolePolicyDocument:
-        Version: "2012-10-17"
-        Statement:
-          - Effect: Allow
-            Principal: { Service: lambda.amazonaws.com }
-            Action: sts:AssumeRole
-      ManagedPolicyArns:
-        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
-
-  AutoConfirmFn:
-    Type: AWS::Lambda::Function
-    Properties:
-      FunctionName: maeum-ledger-auto-confirm
-      Runtime: nodejs20.x
-      Handler: index.handler
-      Role: !GetAtt AutoConfirmRole.Arn
-      Timeout: 5
-      Code:
-        ZipFile: |
-          exports.handler = async (event) => {
-            event.response.autoConfirmUser = true;
-            return event;
-          };
-
-  AutoConfirmPermission:
-    Type: AWS::Lambda::Permission
-    Properties:
-      FunctionName: !Ref AutoConfirmFn
-      Action: lambda:InvokeFunction
-      Principal: cognito-idp.amazonaws.com
-      SourceArn: !GetAtt UserPoolV3.Arn
 
   KakaoProvider:
     Type: AWS::Cognito::UserPoolIdentityProvider
@@ -151,17 +114,15 @@ Resources:
       GenerateSecret: false
       PreventUserExistenceErrors: ENABLED
       ExplicitAuthFlows:
-        - ALLOW_USER_SRP_AUTH
         - ALLOW_REFRESH_TOKEN_AUTH
       ReadAttributes: [nickname, picture]
       WriteAttributes: [nickname, picture]
       SupportedIdentityProviders:
-        - COGNITO
         - !If [HasKakao, !Ref KakaoProvider, !Ref AWS::NoValue]
         - !If [HasGoogle, !Ref GoogleProvider, !Ref AWS::NoValue]
       AllowedOAuthFlowsUserPoolClient: true
       AllowedOAuthFlows: [code]
-      AllowedOAuthScopes: [openid, email, profile, aws.cognito.signin.user.admin]
+      AllowedOAuthScopes: [openid, profile, aws.cognito.signin.user.admin]
       CallbackURLs: !Ref CallbackUrls
       LogoutURLs: !Ref LogoutUrls
       TokenValidityUnits:

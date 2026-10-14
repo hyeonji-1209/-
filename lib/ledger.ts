@@ -65,6 +65,18 @@ function read(key: string): LedgerData | null {
   }
 }
 
+/** 재시도해도 소용없는 DynamoDB 오류 이름 */
+const PERMANENT = new Set(["ValidationException", "AccessDeniedException", "ResourceNotFoundException", "ItemCollectionSizeLimitExceededException"]);
+const pendingKey = (user: string | null) => `maeum-ledger.pending.${user}`;
+function readPending(key: string): cloud.Op[] {
+  try {
+    const raw = localStorage.getItem(key);
+    return raw ? (JSON.parse(raw) as cloud.Op[]) : [];
+  } catch {
+    return [];
+  }
+}
+
 const newId = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 const metaOf = (d: LedgerData): cloud.Meta => ({ relations: d.relations, currentEventId: d.currentEventId, lastRelation: d.lastRelation });
 
@@ -75,11 +87,50 @@ const metaOf = (d: LedgerData): cloud.Meta => ({ relations: d.relations, current
 export function useLedger(user: string | null) {
   const [data, setDataState] = useState<LedgerData>(EMPTY);
   const [ready, setReady] = useState(false);
+  /** 클라우드에 못 보낸 변경이 남아 있다 (네트워크 등) */
   const [saveFailed, setSaveFailed] = useState(false);
+  /** 서버에서 기록을 못 읽어 왔다 — 이 기기의 사본을 보여 주는 중 */
+  const [loadFailed, setLoadFailed] = useState(false);
   /** 처음 로그인하면서 이 기기 기록을 계정으로 옮긴 건수 */
   const [migrated, setMigrated] = useState(0);
   const dataRef = useRef<LedgerData>(EMPTY);
-  const queue = useRef<Promise<unknown>>(Promise.resolve());
+  /** 아직 클라우드에 반영 못 한 변경들. localStorage 에도 같이 두어 탭을 닫아도 남는다 */
+  const pending = useRef<cloud.Op[]>([]);
+  const flushing = useRef(false);
+
+  const savePending = useCallback(() => {
+    try {
+      const key = pendingKey(user);
+      if (pending.current.length) localStorage.setItem(key, JSON.stringify(pending.current));
+      else localStorage.removeItem(key);
+    } catch {
+      /* 저장소가 막혀 있어도 메모리 큐로는 계속 간다 */
+    }
+  }, [user]);
+
+  /** 밀린 변경을 순서대로 보낸다. 하나라도 실패하면 거기서 멈추고 나중에 다시 */
+  const flush = useCallback(async () => {
+    if (!user || flushing.current) return;
+    flushing.current = true;
+    try {
+      while (pending.current.length) {
+        try {
+          await cloud.run(pending.current[0]);
+        } catch (e) {
+          // 다시 보내도 똑같이 거절될 오류(항목 형식 등)는 버리고 다음으로. 네트워크 오류는 남겨 두고 멈춘다
+          if (!PERMANENT.has((e as { name?: string })?.name ?? "")) throw e;
+          console.error("저장 못 한 변경을 건너뜀", e);
+        }
+        pending.current = pending.current.slice(1);
+        savePending();
+      }
+      setSaveFailed(false);
+    } catch {
+      setSaveFailed(true);
+    } finally {
+      flushing.current = false;
+    }
+  }, [user, savePending]);
 
   const commit = useCallback(
     (next: LedgerData) => {
@@ -107,8 +158,15 @@ export function useLedger(user: string | null) {
       setReady(true);
       return;
     }
+    pending.current = readPending(pendingKey(user));
     (async () => {
       try {
+        // 지난번에 못 보낸 변경부터 보낸다. 아직도 못 보내면 서버 것을 받지 않는다(이 기기 변경이 더 최신이니까)
+        await flush();
+        if (pending.current.length) {
+          if (alive) setLoadFailed(true);
+          return;
+        }
         let remote = await cloud.loadAll();
         if (!remote) {
           const local = read(LOCAL_KEY);
@@ -119,31 +177,38 @@ export function useLedger(user: string | null) {
             if (alive) setMigrated(local.gifts.length + local.events.length);
           } else remote = EMPTY;
         }
-        if (alive) commit(normalize(remote));
+        if (alive) {
+          // 불러오는 사이에 이 기기에서 바꾼 게 있으면(아직 못 보냈으면) 서버 것으로 덮지 않는다
+          if (!pending.current.length) commit(normalize(remote));
+          setLoadFailed(false);
+        }
       } catch {
-        if (alive) setSaveFailed(true);
+        if (alive) setLoadFailed(true);
       } finally {
         if (alive) setReady(true);
       }
     })();
+    // 인터넷이 돌아오면 밀린 것을 다시 보낸다
+    const onOnline = () => void flush();
+    window.addEventListener("online", onOnline);
     return () => {
       alive = false;
+      window.removeEventListener("online", onOnline);
     };
-  }, [user, commit]);
+  }, [user, commit, flush]);
 
   /** 상태를 바꾸고, 로그인 상태면 같은 변경을 클라우드에도 순서대로 보낸다 */
   const mutate = useCallback(
-    (fn: (d: LedgerData) => LedgerData, op?: (next: LedgerData) => Promise<unknown>) => {
+    (fn: (d: LedgerData) => LedgerData, ops?: (next: LedgerData) => cloud.Op[]) => {
       const next = fn(dataRef.current);
       commit(next);
-      if (user && op) {
-        queue.current = queue.current.then(() => op(next)).then(
-          () => setSaveFailed(false),
-          () => setSaveFailed(true),
-        );
+      if (user && ops) {
+        pending.current = [...pending.current, ...ops(next)];
+        savePending();
+        void flush();
       }
     },
-    [user, commit],
+    [user, commit, savePending, flush],
   );
 
   const createEvent = useCallback(
@@ -157,10 +222,7 @@ export function useLedger(user: string | null) {
       };
       mutate(
         (d) => ({ ...d, events: [...d.events, event], currentEventId: event.id }),
-        async (n) => {
-          await cloud.putEvent(event);
-          await cloud.putMeta(metaOf(n));
-        },
+        (n) => [{ t: "event", item: event }, { t: "meta", meta: metaOf(n) }],
       );
       return event;
     },
@@ -168,7 +230,7 @@ export function useLedger(user: string | null) {
   );
 
   const openEvent = useCallback(
-    (id: string | null) => mutate((d) => ({ ...d, currentEventId: id }), (n) => cloud.putMeta(metaOf(n))),
+    (id: string | null) => mutate((d) => ({ ...d, currentEventId: id }), (n) => [{ t: "meta", meta: metaOf(n) }]),
     [mutate],
   );
 
@@ -178,7 +240,7 @@ export function useLedger(user: string | null) {
         (d) => ({ ...d, events: d.events.map((e) => (e.id === id ? { ...e, ...patch } : e)) }),
         (n) => {
           const e = n.events.find((x) => x.id === id);
-          return e ? cloud.putEvent(e) : Promise.resolve();
+          return e ? [{ t: "event", item: e }] : [];
         },
       ),
     [mutate],
@@ -194,10 +256,7 @@ export function useLedger(user: string | null) {
           gifts: d.gifts.filter((g) => g.eventId !== id),
           currentEventId: d.currentEventId === id ? null : d.currentEventId,
         }),
-        async (n) => {
-          await cloud.deleteEvent(id, giftIds);
-          await cloud.putMeta(metaOf(n));
-        },
+        (n) => [{ t: "delEvent", id, giftIds }, { t: "meta", meta: metaOf(n) }],
       );
     },
     [mutate],
@@ -208,10 +267,7 @@ export function useLedger(user: string | null) {
       const gift: Gift = { id: newId(), eventId, ...details, createdAt: Date.now() };
       mutate(
         (d) => ({ ...d, gifts: [...d.gifts, gift], lastRelation: gift.relation }),
-        async (n) => {
-          await cloud.putGift(gift);
-          await cloud.putMeta(metaOf(n));
-        },
+        (n) => [{ t: "gift", item: gift }, { t: "meta", meta: metaOf(n) }],
       );
       return gift;
     },
@@ -224,14 +280,14 @@ export function useLedger(user: string | null) {
         (d) => ({ ...d, gifts: d.gifts.map((g) => (g.id === id ? { ...g, ...patch } : g)) }),
         (n) => {
           const g = n.gifts.find((x) => x.id === id);
-          return g ? cloud.putGift(g) : Promise.resolve();
+          return g ? [{ t: "gift", item: g }] : [];
         },
       ),
     [mutate],
   );
 
   const removeGift = useCallback(
-    (id: string) => mutate((d) => ({ ...d, gifts: d.gifts.filter((g) => g.id !== id) }), () => cloud.deleteGift(id)),
+    (id: string) => mutate((d) => ({ ...d, gifts: d.gifts.filter((g) => g.id !== id) }), () => [{ t: "delGift", id }]),
     [mutate],
   );
 
@@ -239,19 +295,19 @@ export function useLedger(user: string | null) {
     (gift: Gift) =>
       mutate(
         (d) => (d.gifts.some((g) => g.id === gift.id) ? d : { ...d, gifts: [...d.gifts, gift] }),
-        () => cloud.putGift(gift),
+        () => [{ t: "gift", item: gift }],
       ),
     [mutate],
   );
 
   const addRelation = useCallback(
     (name: string) =>
-      mutate((d) => (d.relations.includes(name) ? d : { ...d, relations: [...d.relations, name] }), (n) => cloud.putMeta(metaOf(n))),
+      mutate((d) => (d.relations.includes(name) ? d : { ...d, relations: [...d.relations, name] }), (n) => [{ t: "meta", meta: metaOf(n) }]),
     [mutate],
   );
 
   const removeRelation = useCallback(
-    (name: string) => mutate((d) => ({ ...d, relations: d.relations.filter((r) => r !== name) }), (n) => cloud.putMeta(metaOf(n))),
+    (name: string) => mutate((d) => ({ ...d, relations: d.relations.filter((r) => r !== name) }), (n) => [{ t: "meta", meta: metaOf(n) }]),
     [mutate],
   );
 
@@ -259,6 +315,7 @@ export function useLedger(user: string | null) {
     data,
     ready,
     saveFailed,
+    loadFailed,
     migrated,
     cloud: !!user,
     createEvent,

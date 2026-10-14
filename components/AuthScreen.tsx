@@ -1,10 +1,35 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import { signInWithRedirect } from "aws-amplify/auth";
 import { env } from "@/lib/amplify";
 
-/** 소셜 로그인만. 아이디·비밀번호·이메일은 받지 않는다. */
+type Provider = "kakao" | "google";
+const LAST_KEY = "maeum-ledger.lastProvider";
+const NAME: Record<Provider, string> = { kakao: "카카오", google: "Google" };
+
+/** 소셜 로그인만. 아이디·비밀번호·이메일은 받지 않는다.
+ *  카카오와 Google 은 서로 다른 계정(= 다른 장부)이라, 지난번에 쓴 방법을 기억해 두고 알려 준다. */
 export default function AuthScreen() {
+  const [last, setLast] = useState<Provider | null>(null);
+  useEffect(() => {
+    try {
+      const v = localStorage.getItem(LAST_KEY);
+      if (v === "kakao" || v === "google") setLast(v);
+    } catch {
+      /* 저장소가 막혀 있으면 안내만 생략 */
+    }
+  }, []);
+
+  function go(p: Provider) {
+    try {
+      localStorage.setItem(LAST_KEY, p);
+    } catch {
+      /* ignore */
+    }
+    return signInWithRedirect(p === "kakao" ? { provider: { custom: "Kakao" } } : { provider: "Google" });
+  }
+
   return (
     <div className="auth">
       <div className="auth-card">
@@ -17,21 +42,27 @@ export default function AuthScreen() {
 
         <div className="social">
           {env.kakao && (
-            <button type="button" className="btn kakao wide" onClick={() => signInWithRedirect({ provider: { custom: "Kakao" } })}>
+            <button type="button" className="btn kakao wide" onClick={() => go("kakao")}>
               <KakaoMark />
               카카오로 시작하기
+              {last === "kakao" && <span className="last-tag">지난번</span>}
             </button>
           )}
           {env.google && (
-            <button type="button" className="btn google wide" onClick={() => signInWithRedirect({ provider: "Google" })}>
+            <button type="button" className="btn google wide" onClick={() => go("google")}>
               <GoogleMark />
               Google로 시작하기
+              {last === "google" && <span className="last-tag">지난번</span>}
             </button>
           )}
           {!env.kakao && !env.google && <p className="auth-error">로그인 방법이 아직 설정되지 않았어요.</p>}
         </div>
 
-        <p className="auth-foot">비밀번호 없이 로그인돼요. 닉네임은 그 계정의 이름을 그대로 씁니다.</p>
+        <p className="auth-foot">
+          {last
+            ? `지난번엔 ${NAME[last]}로 들어왔어요. 같은 방법으로 들어와야 같은 장부가 보여요.`
+            : "카카오와 Google은 서로 다른 장부예요. 처음 고른 방법으로 계속 들어와 주세요."}
+        </p>
       </div>
     </div>
   );

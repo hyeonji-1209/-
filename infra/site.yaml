@@ -99,6 +99,7 @@ Resources:
           Compress: true
           # 관리형 정책 CachingOptimized
           CachePolicyId: 658327ea-f89d-4fab-a63d-7e88639e58f6
+          ResponseHeadersPolicyId: !Ref Headers
         CustomErrorResponses:
           - ErrorCode: 403
             ResponseCode: 404
@@ -108,6 +109,22 @@ Resources:
             ResponseCode: 404
             ResponsePagePath: /404.html
             ErrorCachingMinTTL: 10
+
+  # 브라우저 보안 헤더. CSP 는 Next 정적 빌드의 인라인 스크립트 때문에 'unsafe-inline' 이 필요해 실익이 없어 넣지 않았다.
+  Headers:
+    Type: AWS::CloudFront::ResponseHeadersPolicy
+    Properties:
+      ResponseHeadersPolicyConfig:
+        Name: maeum-site-headers
+        SecurityHeadersConfig:
+          StrictTransportSecurity: { AccessControlMaxAgeSec: 31536000, IncludeSubdomains: true, Preload: false, Override: true }
+          ContentTypeOptions: { Override: true }
+          FrameOptions: { FrameOption: DENY, Override: true }
+          ReferrerPolicy: { ReferrerPolicy: strict-origin-when-cross-origin, Override: true }
+          XSSProtection: { Protection: true, ModeBlock: true, Override: true }
+        CustomHeadersConfig:
+          Items:
+            - { Header: Permissions-Policy, Value: "camera=(), microphone=(), geolocation=()", Override: true }
 
   BucketPolicy:
     Type: AWS::S3::BucketPolicy

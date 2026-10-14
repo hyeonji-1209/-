@@ -76,8 +76,8 @@ function EventCard({ event, gifts, state, onSelect, onCover, toast }: CardProps)
     try {
       onCover(await fileToCover(file));
       toast("대표 사진을 바꿨어요.");
-    } catch {
-      toast("이미지 파일만 넣을 수 있어요.");
+    } catch (e) {
+      toast((e as Error).message || "사진을 넣지 못했어요.");
     }
   }
 

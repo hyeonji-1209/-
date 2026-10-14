@@ -59,9 +59,13 @@ export default function App({ user, username, nickname, onSignOut }: Props) {
         </div>
       </nav>
 
-      {ledger.saveFailed && (
+      {(ledger.saveFailed || ledger.loadFailed) && (
         <div className="save-error" role="alert">
-          {ledger.cloud ? "저장이 안 되고 있어요. 인터넷 연결을 확인해 주세요." : "이 브라우저에 저장하지 못하고 있어요. 시크릿 모드라면 일반 창에서 열어 주세요."}
+          {!ledger.cloud
+            ? "이 브라우저에 저장하지 못하고 있어요. 시크릿 모드라면 일반 창에서 열어 주세요."
+            : ledger.saveFailed
+              ? "아직 계정에 저장되지 않은 기록이 있어요. 인터넷이 연결되면 자동으로 저장돼요. 그 전엔 이 탭을 닫지 마세요."
+              : "계정에서 기록을 불러오지 못했어요. 이 기기에 있던 사본을 보여 주고 있어요."}
         </div>
       )}
 

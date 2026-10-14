@@ -34,7 +34,7 @@ export function configureAmplify() {
             ? {
                 oauth: {
                   domain: env.authDomain,
-                  scopes: ["openid", "email", "profile", "aws.cognito.signin.user.admin"],
+                  scopes: ["openid", "profile", "aws.cognito.signin.user.admin"],
                   redirectSignIn: [here],
                   redirectSignOut: [here],
                   responseType: "code" as const,

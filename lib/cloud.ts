@@ -101,6 +101,29 @@ export async function deleteEvent(id: string, giftIds: string[]) {
   await batch(doc, [skEvent(id), ...giftIds.map(skGift)].map((sk) => ({ DeleteRequest: { Key: { pk, sk } } })));
 }
 
+/** 로컬에서 바꾼 내용을 클라우드에 똑같이 적용하는 한 단위. 직렬화해서 localStorage 에 쌓아 두므로 함수가 아니라 데이터다. */
+export type Op =
+  | { t: "event"; item: LedgerEvent }
+  | { t: "gift"; item: Gift }
+  | { t: "delGift"; id: string }
+  | { t: "delEvent"; id: string; giftIds: string[] }
+  | { t: "meta"; meta: Meta };
+
+export function run(op: Op): Promise<unknown> {
+  switch (op.t) {
+    case "event":
+      return putEvent(op.item);
+    case "gift":
+      return putGift(op.item);
+    case "delGift":
+      return deleteGift(op.id);
+    case "delEvent":
+      return deleteEvent(op.id, op.giftIds);
+    case "meta":
+      return putMeta(op.meta);
+  }
+}
+
 /** 처음 로그인했을 때 이 기기에 있던 기록을 통째로 올린다 */
 export async function uploadAll(d: LedgerData) {
   const { doc, pk } = await conn();

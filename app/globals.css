@@ -363,6 +363,12 @@ select.line-input { cursor: pointer; }
 .btn.kakao:hover { background: #f7dc00; }
 .btn.google { background: #fff; color: #1f1f1f; border: 1px solid var(--line-strong); }
 .btn.google:hover { background: #f8f9fa; }
+.social .btn { position: relative; }
+.last-tag {
+  position: absolute; right: 14px; top: 50%; transform: translateY(-50%);
+  font-size: 12px; font-weight: 600; padding: 3px 8px; border-radius: 999px;
+  background: rgba(24, 24, 27, .08); color: inherit; opacity: .8;
+}
 .auth-foot { margin-top: 18px; font-size: 14px; color: var(--ghost); text-align: center; line-height: 1.5; }
 .auth-links { display: flex; justify-content: center; gap: 20px; margin-top: 14px; font-size: 14px; }
 .auth-links .link { color: var(--muted); text-decoration: none; }
