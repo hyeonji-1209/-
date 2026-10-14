@@ -125,8 +125,11 @@ function EventCard({ event, gifts, state, onSelect, onCover, toast }: CardProps)
       <div className="card-text">
         <span className="card-type">{info.label}</span>
         <span className="card-title">{event.title}</span>
-        <span className="card-sub">{[shortDate(event.date), event.place].filter(Boolean).join(" · ")}</span>
-        <span className="card-sum num">{gifts.length ? `${gifts.length}명 · ${money(total)}` : "아직 기록 없음"}</span>
+        <span className="card-sub">
+          <span>{shortDate(event.date)}</span>
+          {event.place && <span className="card-place">{event.place}</span>}
+        </span>
+        {gifts.length > 0 && <span className="card-sum num">{`${gifts.length}명 · ${money(total)}`}</span>}
       </div>
       {state === "on" && <span className="sr-only">선택됨</span>}
     </div>

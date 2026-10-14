@@ -35,39 +35,45 @@ export default function App({ user, username, nickname, onSignOut }: Props) {
   if (!ledger.ready) return <div className="app" />;
 
   return (
-    <div className="app">
+    <div className="app" >
       <nav className="topnav">
         <div className="topnav-inner">
           <span className="brand">
             <img className="brand-mark" src="/brand.png" alt="" />
-            마음장부
+            <span className="brand-name">마음장부</span>
           </span>
-          <button type="button" className={`pill${current ? "" : " active"}`} onClick={() => ledger.openEvent(null)}>
-            전체 기록
+          {/* 폰에서는 글자 대신 아이콘만 보인다 (.pill-text 숨김) */}
+          <button type="button" className={`pill${current ? "" : " active"}`} onClick={() => ledger.openEvent(null)} aria-label="전체 기록">
+            <ListIcon />
+            <span className="pill-text">전체 기록</span>
           </button>
-          <button type="button" className="pill solid" onClick={() => setModal("new")}>
-            + 새 행사
+          <button type="button" className="pill solid" onClick={() => setModal("new")} aria-label="새 행사">
+            <PlusIcon />
+            <span className="pill-text">+ 새 행사</span>
           </button>
           {onSignOut && (
             <span className="who">
               {who && <span className="who-name">{who}님</span>}
-              <button type="button" className="pill ghost" onClick={onSignOut} title={username ?? undefined}>
-                로그아웃
+              <button type="button" className="pill ghost" onClick={onSignOut} title={username ?? undefined} aria-label="로그아웃">
+                <ExitIcon />
+                <span className="pill-text">로그아웃</span>
               </button>
             </span>
           )}
         </div>
       </nav>
 
-      {(ledger.saveFailed || ledger.loadFailed) && (
-        <div className="save-error" role="alert">
-          {!ledger.cloud
-            ? "이 브라우저에 저장하지 못하고 있어요. 시크릿 모드라면 일반 창에서 열어 주세요."
-            : ledger.saveFailed
-              ? "아직 계정에 저장되지 않은 기록이 있어요. 인터넷이 연결되면 자동으로 저장돼요. 그 전엔 이 탭을 닫지 마세요."
-              : "계정에서 기록을 불러오지 못했어요. 이 기기에 있던 사본을 보여 주고 있어요."}
-        </div>
-      )}
+      {
+        (ledger.saveFailed || ledger.loadFailed) && (
+          <div className="save-error" role="alert">
+            {!ledger.cloud
+              ? "이 브라우저에 저장하지 못하고 있어요. 시크릿 모드라면 일반 창에서 열어 주세요."
+              : ledger.saveFailed
+                ? "아직 계정에 저장되지 않은 기록이 있어요. 인터넷이 연결되면 자동으로 저장돼요. 그 전엔 이 탭을 닫지 마세요."
+                : "계정에서 기록을 불러오지 못했어요. 이 기기에 있던 사본을 보여 주고 있어요."}
+          </div>
+        )
+      }
 
       <section className="hero">
         <div className="hero-copy">
@@ -78,7 +84,7 @@ export default function App({ user, username, nickname, onSignOut }: Props) {
             <b>한곳에 모아두세요</b>
           </h2>
           <p>
-            행사를 고르면 아래에서 바로
+            행사를 고르면 아래에서 바로{" "}
             <br />
             방명록을 적을 수 있어요.
           </p>
@@ -108,34 +114,60 @@ export default function App({ user, username, nickname, onSignOut }: Props) {
         {ledger.cloud ? `${who ?? "내"} 계정에 저장돼요` : "이 기기에만 저장돼요"} · 기록은 ‘엑셀로 다운받기’로 꺼낼 수 있어요
       </footer>
 
-      {modal === "new" && (
-        <EventModal
-          onClose={() => setModal(null)}
-          onSave={(details) => {
-            const e = ledger.createEvent(details);
-            setJustCreated(e.id);
-            setModal(null);
-          }}
-        />
-      )}
-      {modal === "edit" && current && (
-        <EventModal
-          event={current}
-          giftCount={gifts.filter((g) => g.eventId === current.id).length}
-          onClose={() => setModal(null)}
-          onSave={(details) => {
-            ledger.updateEvent(current.id, details);
-            setModal(null);
-            toast.show("행사 정보를 고쳤어요.");
-          }}
-          onDelete={() => {
-            ledger.deleteEvent(current.id);
-            setModal(null);
-            toast.show(`${current.title} 행사를 지웠어요.`);
-          }}
-        />
-      )}
+      {
+        modal === "new" && (
+          <EventModal
+            onClose={() => setModal(null)}
+            onSave={(details) => {
+              const e = ledger.createEvent(details);
+              setJustCreated(e.id);
+              setModal(null);
+            }}
+          />
+        )
+      }
+      {
+        modal === "edit" && current && (
+          <EventModal
+            event={current}
+            giftCount={gifts.filter((g) => g.eventId === current.id).length}
+            onClose={() => setModal(null)}
+            onSave={(details) => {
+              ledger.updateEvent(current.id, details);
+              setModal(null);
+              toast.show("행사 정보를 고쳤어요.");
+            }}
+            onDelete={() => {
+              ledger.deleteEvent(current.id);
+              setModal(null);
+              toast.show(`${current.title} 행사를 지웠어요.`);
+            }}
+          />
+        )
+      }
       {toast.node}
-    </div>
+    </div >
+  );
+}
+
+function ListIcon() {
+  return (
+    <svg className="pill-icon" viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M4 7h16M4 12h16M4 17h10" />
+    </svg>
+  );
+}
+function PlusIcon() {
+  return (
+    <svg className="pill-icon" viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M12 5v14M5 12h14" />
+    </svg>
+  );
+}
+function ExitIcon() {
+  return (
+    <svg className="pill-icon" viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M10 4H5v16h5M14 8l4 4-4 4M8 12h10" />
+    </svg>
   );
 }

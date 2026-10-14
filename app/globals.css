@@ -46,7 +46,7 @@ input::placeholder { color: var(--placeholder); }
 .num { font-variant-numeric: tabular-nums; }
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 
-.app { min-height: 100vh; display: flex; flex-direction: column; }
+.app { min-height: 100vh; min-height: 100dvh; display: flex; flex-direction: column; }
 
 /* ── 상단 ───────────────────────────────── */
 .topnav {
@@ -67,6 +67,7 @@ input::placeholder { color: var(--placeholder); }
   font-size: 15px; font-weight: 600; color: var(--sub);
   transition: background .15s, color .15s;
 }
+.pill-icon { display: none; width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.9; stroke-linecap: round; stroke-linejoin: round; }
 .pill:hover { color: var(--ink); }
 .pill.active { background: var(--ink); color: #fff; }
 .pill.solid { background: var(--ink); color: #fff; padding: 0 18px; }
@@ -136,7 +137,9 @@ input::placeholder { color: var(--placeholder); }
 }
 .card-type { font-size: 14px; font-weight: 600; color: rgba(255, 255, 255, .85); }
 .card-title { font-size: 20px; font-weight: 700; letter-spacing: -0.03em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.card-sub { font-size: 14px; color: rgba(255, 255, 255, .8); }
+.card-sub { display: flex; flex-wrap: wrap; gap: 0 5px; font-size: 14px; color: rgba(255, 255, 255, .8); }
+.card-place { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.card-place::before { content: "· "; }
 .card-sum { padding-top: 8px; margin-top: 6px; border-top: 1px solid rgba(255, 255, 255, .22); font-size: 14px; font-weight: 600; }
 
 .new-card {
@@ -202,7 +205,8 @@ input::placeholder { color: var(--placeholder); }
 }
 .chip:hover .chip-x, .chip-x:focus-visible { opacity: 1; }
 .chip-x:hover { color: var(--danger); }
-@media (hover: none) { .chip-x { opacity: .9; } }
+/* 터치 기기: × 는 지금 고른 버튼에만 보인다 (전부 보이면 어지럽다) */
+@media (hover: none) { .chip-x { display: none; } .chip.on .chip-x { display: block; opacity: 1; } }
 .chip-input {
   height: 34px; width: 110px; padding: 0 14px; border: 1px solid var(--ink); border-radius: 999px;
   background: #fff; font-size: 14px; line-height: 1; outline: none;
@@ -243,7 +247,7 @@ input::placeholder { color: var(--placeholder); }
 .row-del:hover { background: var(--danger-soft); color: var(--danger); }
 .list-empty { padding: 56px 20px; text-align: center; font-size: 15px; color: var(--ghost); }
 
-.foot { background: var(--panel); padding: 0 var(--gutter) 40px; text-align: center; font-size: 14px; color: var(--ghost); }
+.foot { background: var(--panel); padding: 0 var(--gutter) calc(40px + env(safe-area-inset-bottom)); text-align: center; font-size: 14px; color: var(--ghost); }
 .link { font-size: inherit; color: var(--sub); text-decoration: underline; text-underline-offset: 3px; }
 .link:hover { color: var(--ink); }
 
@@ -255,7 +259,7 @@ input::placeholder { color: var(--placeholder); }
 }
 .sheet {
   width: 100%; max-width: 460px; background: #fff; border-radius: 14px; padding: 32px 32px 28px;
-  box-shadow: 0 24px 60px -12px rgba(17, 18, 22, .3); max-height: calc(100vh - 48px); overflow-y: auto;
+  box-shadow: 0 24px 60px -12px rgba(17, 18, 22, .3); max-height: calc(100vh - 48px); max-height: calc(100dvh - 48px); overflow-y: auto;
 }
 .sheet-head { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 30px; }
 .sheet-head h2 { font-size: 21px; font-weight: 600; letter-spacing: -0.03em; }
@@ -292,7 +296,7 @@ select.line-input { cursor: pointer; }
 
 /* ── 알림 ───────────────────────────────── */
 .toast {
-  position: fixed; left: 50%; bottom: 28px; transform: translateX(-50%); z-index: 20;
+  position: fixed; left: 50%; bottom: calc(28px + env(safe-area-inset-bottom)); transform: translateX(-50%); z-index: 20;
   display: flex; align-items: center; gap: 16px; max-width: calc(100% - 32px);
   padding: 12px 18px; border-radius: 999px; background: var(--ink); color: #fff; font-size: 14px;
   box-shadow: 0 10px 30px -10px rgba(17, 18, 22, .4);
@@ -341,10 +345,49 @@ select.line-input { cursor: pointer; }
   .event-form { gap: 24px; }
   .type-tabs { gap: 16px; }
   .field-row { grid-template-columns: 1fr; gap: 20px; }
+  .card { width: 220px; height: 280px; }
+  .card-sub { flex-direction: column; }
+  .card-place::before { content: none; }
+  .card-empty { top: 44px; }
+  .row-del { width: 40px; height: 40px; }
 }
 
+/* ── 폰 ─────────────────────────────────── */
+@media (max-width: 480px) {
+  :root { --gutter: 16px; }
+  .topnav-inner { gap: 8px; }
+  .brand { flex: 1; min-width: 0; }
+  .pill, .pill.solid, .pill.ghost {
+    width: 40px; height: 40px; padding: 0; border-radius: 50%;
+    display: inline-flex; align-items: center; justify-content: center;
+  }
+  .pill-text { display: none; }
+  .pill-icon { display: block; }
+  .pill, .pill.ghost { color: var(--sub); background: var(--soft); }
+  .pill.outline { width: auto; height: 46px; padding: 0 22px; border-radius: 999px; }
+  .pill.outline .pill-text { display: inline; }
+  .hero { padding-top: 20px; }
+  .hero-copy h2 { font-size: 28px; }
+  .panel { padding: 28px var(--gutter) 48px; }
+  .panel-title h1 { font-size: 26px; }
+  .panel-total strong { font-size: 28px; }
+  .list-tools { gap: 8px; }
+  .search { width: 140px; flex: 1; max-width: 200px; }
+  .sheet { padding: 22px 18px 20px; }
+  .type-tabs { gap: 12px; }
+}
+
+/* ── 아주 좁은 폰(320px) / 확대 보기 ─────── */
+@media (max-width: 400px) {
+  .hero-copy h2 { font-size: 26px; }
+  .card { width: 200px; height: 260px; }
+  .search { width: 120px; }
+}
+/* 어떤 요소가 삐져나와도 옆으로 밀리지 않게 */
+body { overflow-x: clip; }
+
 /* ── 로그인 ─────────────────────────────── */
-.auth { min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 24px; }
+.auth { min-height: 100vh; min-height: 100dvh; display: flex; align-items: center; justify-content: center; padding: 24px; }
 .auth-card {
   width: 100%; max-width: 400px; background: var(--panel); border-radius: 20px; padding: 36px 32px 28px;
   box-shadow: 0 1px 2px rgba(17, 18, 22, .04), 0 10px 30px -12px rgba(17, 18, 22, .12);
