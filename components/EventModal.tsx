@@ -62,7 +62,7 @@ export default function EventModal({ event, giftCount = 0, onClose, onSave, onDe
           </label>
           <label className="field">
             <span>장소</span>
-            <input id="event-place" className="line-input" value={place} onChange={(e) => setPlace(e.target.value)} placeholder="예: 일산" />
+            <input id="event-place" className="line-input" value={place} onChange={(e) => setPlace(e.target.value)} placeholder="예: 서울 강남" />
           </label>
         </div>
 

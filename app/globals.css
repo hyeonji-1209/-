@@ -229,6 +229,8 @@ input::placeholder { color: var(--placeholder); }
 .search input { border: 0; outline: none; background: transparent; font-size: 14px; flex: 1; min-width: 0; color: var(--ink); }
 .search input::-webkit-search-cancel-button { display: none; }
 
+/* 8줄(68px)까지만 보이고 그 아래는 목록 안에서 스크롤 */
+.rows { max-height: min(544px, 65vh); overflow-y: auto; overscroll-behavior: contain; scrollbar-gutter: stable; }
 .row {
   display: grid; grid-template-columns: minmax(0, 1fr) 140px 180px 44px; align-items: center; gap: 16px;
   min-height: 68px; border-bottom: 1px solid var(--line);
