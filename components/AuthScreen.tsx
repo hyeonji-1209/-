@@ -1,182 +1,60 @@
 "use client";
 
-import { useState, type FormEvent } from "react";
-import { confirmResetPassword, confirmSignUp, resendSignUpCode, resetPassword, signIn, signInWithRedirect, signUp } from "aws-amplify/auth";
+import { signInWithRedirect } from "aws-amplify/auth";
 import { env } from "@/lib/amplify";
-import { authMessage } from "@/lib/auth";
 
-type Mode = "login" | "signup" | "confirm" | "forgot" | "reset";
-
-const TITLE: Record<Mode, string> = {
-  login: "로그인",
-  signup: "회원가입",
-  confirm: "이메일 인증",
-  forgot: "비밀번호 찾기",
-  reset: "새 비밀번호",
-};
-
-export default function AuthScreen({ onSignedIn }: { onSignedIn: () => void }) {
-  const [mode, setMode] = useState<Mode>("login");
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [code, setCode] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState("");
-  const [notice, setNotice] = useState("");
-
-  function go(next: Mode) {
-    setMode(next);
-    setError("");
-    setNotice("");
-    setCode("");
-  }
-
-  async function run(fn: () => Promise<void>) {
-    setBusy(true);
-    setError("");
-    try {
-      await fn();
-    } catch (e) {
-      if ((e as { name?: string })?.name === "UserNotConfirmedException") {
-        await resendSignUpCode({ username: email }).catch(() => {});
-        setNotice("가입이 아직 안 끝났어요. 메일로 보낸 인증번호를 넣어 주세요.");
-        setMode("confirm");
-      } else setError(authMessage(e));
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  function submit(e: FormEvent) {
-    e.preventDefault();
-    const username = email.trim().toLowerCase();
-    if (mode === "login") {
-      run(async () => {
-        const r = await signIn({ username, password });
-        if (r.isSignedIn) onSignedIn();
-        else if (r.nextStep.signInStep === "CONFIRM_SIGN_UP") go("confirm");
-        else setError("이 계정은 추가 확인이 필요해요.");
-      });
-    } else if (mode === "signup") {
-      run(async () => {
-        const r = await signUp({ username, password, options: { userAttributes: { email: username } } });
-        if (r.isSignUpComplete) {
-          await signIn({ username, password });
-          onSignedIn();
-        } else {
-          setNotice(`${username} 으로 인증번호를 보냈어요.`);
-          setMode("confirm");
-        }
-      });
-    } else if (mode === "confirm") {
-      run(async () => {
-        await confirmSignUp({ username, confirmationCode: code.trim() });
-        if (password) {
-          const r = await signIn({ username, password });
-          if (r.isSignedIn) return onSignedIn();
-        }
-        setNotice("인증이 끝났어요. 로그인해 주세요.");
-        setMode("login");
-      });
-    } else if (mode === "forgot") {
-      run(async () => {
-        await resetPassword({ username });
-        setNotice(`${username} 으로 인증번호를 보냈어요.`);
-        setMode("reset");
-      });
-    } else if (mode === "reset") {
-      run(async () => {
-        await confirmResetPassword({ username, confirmationCode: code.trim(), newPassword: password });
-        const r = await signIn({ username, password });
-        if (r.isSignedIn) onSignedIn();
-        else {
-          setNotice("비밀번호를 바꿨어요. 로그인해 주세요.");
-          setMode("login");
-        }
-      });
-    }
-  }
-
-  const needCode = mode === "confirm" || mode === "reset";
-  const needPassword = mode !== "forgot" && mode !== "confirm";
-
+/** 소셜 로그인만. 아이디·비밀번호·이메일은 받지 않는다. */
+export default function AuthScreen() {
   return (
     <div className="auth">
       <div className="auth-card">
         <div className="brand">
-          <span className="brand-mark" aria-hidden="true" />
+          <img className="brand-mark" src="/brand.png" alt="" />
           마음장부
         </div>
-        <h1>{TITLE[mode]}</h1>
-        <p className="auth-sub">
-          {mode === "login" && "로그인하면 어느 기기에서든 같은 장부를 볼 수 있어요."}
-          {mode === "signup" && "이메일과 비밀번호(8자 이상)만 있으면 돼요."}
-          {mode === "confirm" && (notice || "메일로 보낸 6자리 인증번호를 넣어 주세요.")}
-          {mode === "forgot" && "가입한 이메일로 인증번호를 보내 드려요."}
-          {mode === "reset" && (notice || "인증번호와 새 비밀번호를 넣어 주세요.")}
-        </p>
+        <h1>시작하기</h1>
+        <p className="auth-sub">쓰던 계정으로 바로 시작할 수 있어요. 어느 기기에서든 같은 장부를 봅니다.</p>
 
-        <form className="auth-form" onSubmit={submit}>
-          <label className="field">
-            <span>이메일</span>
-            <input className="line-input" type="email" autoComplete="email" value={email} onChange={(e) => setEmail(e.target.value)} required autoFocus={!needCode} readOnly={needCode} />
-          </label>
-          {needCode && (
-            <label className="field">
-              <span>인증번호</span>
-              <input className="line-input num" inputMode="numeric" autoComplete="one-time-code" value={code} onChange={(e) => setCode(e.target.value)} required autoFocus />
-            </label>
-          )}
-          {needPassword && (
-            <label className="field">
-              <span>{mode === "reset" ? "새 비밀번호" : "비밀번호"}</span>
-              <input
-                className="line-input"
-                type="password"
-                autoComplete={mode === "login" ? "current-password" : "new-password"}
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                required
-                minLength={8}
-              />
-            </label>
-          )}
-          {error && <p className="auth-error">{error}</p>}
-          {!error && notice && mode === "login" && <p className="auth-notice">{notice}</p>}
-          <button type="submit" className="btn primary wide" disabled={busy}>
-            {busy ? "잠시만요…" : mode === "login" ? "로그인" : mode === "signup" ? "가입하기" : mode === "forgot" ? "인증번호 보내기" : "확인"}
-          </button>
-        </form>
-
-        {mode === "login" && env.kakao && (
-          <button type="button" className="btn kakao wide" onClick={() => signInWithRedirect({ provider: { custom: "Kakao" } })}>
-            카카오로 시작하기
-          </button>
-        )}
-
-        <div className="auth-links">
-          {mode === "login" && (
-            <>
-              <button type="button" className="link" onClick={() => go("signup")}>
-                회원가입
-              </button>
-              <button type="button" className="link" onClick={() => go("forgot")}>
-                비밀번호 찾기
-              </button>
-            </>
-          )}
-          {mode === "confirm" && (
-            <button type="button" className="link" onClick={() => run(async () => { await resendSignUpCode({ username: email.trim().toLowerCase() }); setNotice("인증번호를 다시 보냈어요."); })}>
-              인증번호 다시 보내기
+        <div className="social">
+          {env.kakao && (
+            <button type="button" className="btn kakao wide" onClick={() => signInWithRedirect({ provider: { custom: "Kakao" } })}>
+              <KakaoMark />
+              카카오로 시작하기
             </button>
           )}
-          {mode !== "login" && (
-            <button type="button" className="link" onClick={() => go("login")}>
-              로그인으로 돌아가기
+          {env.google && (
+            <button type="button" className="btn google wide" onClick={() => signInWithRedirect({ provider: "Google" })}>
+              <GoogleMark />
+              Google로 시작하기
             </button>
           )}
+          {!env.kakao && !env.google && <p className="auth-error">로그인 방법이 아직 설정되지 않았어요.</p>}
         </div>
+
+        <p className="auth-foot">비밀번호 없이 로그인돼요. 닉네임은 그 계정의 이름을 그대로 씁니다.</p>
       </div>
     </div>
+  );
+}
+
+function KakaoMark() {
+  return (
+    <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
+      <path
+        fill="#191919"
+        d="M12 3C6.48 3 2 6.58 2 11c0 2.84 1.86 5.33 4.66 6.74L5.5 21.5c-.08.3.26.55.52.38l4.5-3.03c.48.06.97.1 1.48.1 5.52 0 10-3.58 10-8S17.52 3 12 3z"
+      />
+    </svg>
+  );
+}
+
+function GoogleMark() {
+  return (
+    <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
+      <path fill="#4285F4" d="M21.6 12.23c0-.68-.06-1.36-.18-2.02H12v3.83h5.4a4.62 4.62 0 0 1-2 3.03v2.5h3.23c1.9-1.74 2.97-4.3 2.97-7.34z" />
+      <path fill="#34A853" d="M12 22c2.7 0 4.96-.9 6.62-2.43l-3.23-2.5c-.9.6-2.04.95-3.39.95-2.6 0-4.8-1.76-5.6-4.12H3.07v2.58A10 10 0 0 0 12 22z" />
+      <path fill="#FBBC05" d="M6.4 13.9A6 6 0 0 1 6.08 12c0-.66.11-1.3.32-1.9V7.52H3.07A10 10 0 0 0 2 12c0 1.61.39 3.14 1.07 4.48L6.4 13.9z" />
+      <path fill="#EA4335" d="M12 5.98c1.47 0 2.78.5 3.82 1.5l2.86-2.86A10 10 0 0 0 12 2a10 10 0 0 0-8.93 5.52L6.4 10.1C7.2 7.74 9.4 5.98 12 5.98z" />
+    </svg>
   );
 }

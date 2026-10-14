@@ -8,6 +8,6 @@ PROFILE="${AWS_PROFILE:-personal}"; STACK="${STACK:-maeum-site}"
 READY=false; [ "${1:-}" = "ready" ] && READY=true
 aws cloudformation deploy --template-file infra/site.yaml --stack-name "$STACK" \
   --profile "$PROFILE" --region us-east-1 --no-fail-on-empty-changeset \
-  --parameter-overrides DomainReady=$READY
+  --parameter-overrides ZoneName=alicework.kr DomainName=heartledger.alicework.kr DomainReady=$READY
 aws cloudformation describe-stacks --stack-name "$STACK" --profile "$PROFILE" --region us-east-1 \
   --query 'Stacks[0].Outputs[].[OutputKey,OutputValue]' --output table

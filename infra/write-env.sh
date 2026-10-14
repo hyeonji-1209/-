@@ -13,5 +13,6 @@ NEXT_PUBLIC_IDENTITY_POOL_ID=$(out IdentityPoolId)
 NEXT_PUBLIC_TABLE=$(out TableName)
 NEXT_PUBLIC_AUTH_DOMAIN=$(out AuthDomain)
 NEXT_PUBLIC_KAKAO=$(out KakaoEnabled)
+NEXT_PUBLIC_GOOGLE=$(out GoogleEnabled)
 ENV
 echo ".env.local 을 썼어요:"; sed 's/=.*/=…/' .env.local

@@ -12,11 +12,13 @@ type Modal = null | "new" | "edit";
 interface Props {
   /** 로그인한 사람의 아이덴티티 ID. 클라우드 미설정이면 null */
   user: string | null;
-  email: string | null;
+  username: string | null;
+  nickname: string | null;
   onSignOut?: () => void;
 }
 
-export default function App({ user, email, onSignOut }: Props) {
+export default function App({ user, username, nickname, onSignOut }: Props) {
+  const who = nickname || username;
   const ledger = useLedger(user);
   const toast = useToast();
   const [modal, setModal] = useState<Modal>(null);
@@ -37,7 +39,7 @@ export default function App({ user, email, onSignOut }: Props) {
       <nav className="topnav">
         <div className="topnav-inner">
           <span className="brand">
-            <span className="brand-mark" aria-hidden="true" />
+            <img className="brand-mark" src="/brand.png" alt="" />
             마음장부
           </span>
           <button type="button" className={`pill${current ? "" : " active"}`} onClick={() => ledger.openEvent(null)}>
@@ -47,9 +49,12 @@ export default function App({ user, email, onSignOut }: Props) {
             + 새 행사
           </button>
           {onSignOut && (
-            <button type="button" className="pill ghost" onClick={onSignOut} title={email ?? undefined}>
-              로그아웃
-            </button>
+            <span className="who">
+              {who && <span className="who-name">{who}님</span>}
+              <button type="button" className="pill ghost" onClick={onSignOut} title={username ?? undefined}>
+                로그아웃
+              </button>
+            </span>
           )}
         </div>
       </nav>
@@ -96,7 +101,7 @@ export default function App({ user, email, onSignOut }: Props) {
       <LedgerPanel ledger={ledger} event={current} focusName={!!current && justCreated === current.id} onEdit={() => setModal("edit")} toast={toast.show} />
 
       <footer className="foot">
-        {ledger.cloud ? `${email ?? "내 계정"}에 저장돼요` : "이 기기에만 저장돼요"} · 기록은 ‘엑셀로 다운받기’로 꺼낼 수 있어요
+        {ledger.cloud ? `${who ?? "내"} 계정에 저장돼요` : "이 기기에만 저장돼요"} · 기록은 ‘엑셀로 다운받기’로 꺼낼 수 있어요
       </footer>
 
       {modal === "new" && (

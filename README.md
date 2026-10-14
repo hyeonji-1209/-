@@ -6,7 +6,7 @@
 - 관계 버튼(친척·친구·교회…)은 "+ 추가"로 직접 만들고, 한 번 고르면 바꾸기 전까지 그대로 유지된다
 - 카드에 사진을 끌어다 놓으면 대표 사진이 된다
 - "엑셀로 다운받기"로 행사별 또는 전체 명단을 .xlsx 로 받는다
-- 로그인하면 어느 기기에서든 같은 장부를 본다 (AWS Cognito + DynamoDB). 로그인 설정이 없으면 이 기기에만 저장한다
+- 로그인은 소셜만(카카오, 구글). 비밀번호·이메일을 받지 않고 닉네임은 그 계정 이름을 쓴다. 어느 기기에서든 같은 장부를 본다 (AWS Cognito + DynamoDB). 로그인 설정이 없으면 이 기기에만 저장한다
 
 ## 실행
 
@@ -18,7 +18,7 @@ npm run build   # out/ 에 정적 사이트 생성
 
 ## 로그인 + DB (개인 AWS 계정, 서울 리전)
 
-인프라는 `infra/stack.yaml` 한 장이다. Cognito 사용자 풀(이메일+비밀번호), 아이덴티티 풀, DynamoDB 테이블 `maeum-ledger`,
+인프라는 `infra/stack.yaml` 한 장이다. Cognito 사용자 풀(소셜 로그인 전용), 아이덴티티 풀, DynamoDB 테이블 `maeum-ledger`,
 그리고 "자기 pk 아래 항목만" 읽고 쓰게 하는 IAM 역할이 들어 있다.
 
 ```bash
@@ -34,12 +34,23 @@ npm run build   # out/ 에 정적 사이트 생성
 ### 카카오 로그인 켜기
 
 1. [카카오 개발자](https://developers.kakao.com) 에서 앱 생성 → 카카오 로그인 활성화 → **OpenID Connect 활성화**
-2. 동의 항목에서 `카카오계정(이메일)` 을 필수로
+2. 동의항목에서 `닉네임` 을 필수 동의로 (이메일은 필요 없다 → 비즈 앱 전환 불필요)
 3. 보안 탭에서 Client Secret 생성 + 활성화
-4. Redirect URI 에 `https://maeum-610863997824.auth.ap-northeast-2.amazoncognito.com/oauth2/idpresponse` 등록
+4. Redirect URI 에 `https://heartledger-610863997824.auth.ap-northeast-2.amazoncognito.com/oauth2/idpresponse` 등록
 5. 배포:
    ```bash
    ./infra/deploy.sh KakaoClientId=REST_API_키 KakaoClientSecret=클라이언트_시크릿
+   ```
+
+### 구글 로그인 켜기
+
+1. [Google Cloud 콘솔](https://console.cloud.google.com/apis/credentials) → 프로젝트 생성 → OAuth 동의 화면(외부, 앱 이름 마음장부) → 게시
+2. 사용자 인증 정보 → OAuth 클라이언트 ID 만들기 → 웹 애플리케이션
+   - 승인된 JavaScript 원본: `https://heartledger-610863997824.auth.ap-northeast-2.amazoncognito.com`
+   - 승인된 리디렉션 URI: `https://heartledger-610863997824.auth.ap-northeast-2.amazoncognito.com/oauth2/idpresponse`
+3. 배포 (카카오 키도 같이 넘겨야 유지된다):
+   ```bash
+   ./infra/deploy.sh KakaoClientId=… KakaoClientSecret=… GoogleClientId=… GoogleClientSecret=…
    ```
 
 배포 주소가 생기면 `CallbackUrls`/`LogoutUrls` 파라미터에도 그 주소를 넣어 다시 배포한다.

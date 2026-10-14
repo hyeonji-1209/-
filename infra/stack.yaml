@@ -15,32 +15,48 @@ Parameters:
   KakaoClientId:
     Type: String
     Default: ""
-    Description: 카카오 개발자 콘솔의 REST API 키. 비우면 카카오 로그인은 꺼진다.
+    Description: 카카오 개발자 콘솔의 REST API 키. 비우면 카카오 로그인은 꺼진다. 동의항목은 닉네임만 있으면 된다.
   KakaoClientSecret:
     Type: String
     Default: ""
     NoEcho: true
     Description: 카카오 개발자 콘솔 > 보안 > Client Secret
+  GoogleClientId:
+    Type: String
+    Default: ""
+    Description: Google Cloud 콘솔 OAuth 클라이언트 ID. 비우면 구글 로그인은 꺼진다.
+  GoogleClientSecret:
+    Type: String
+    Default: ""
+    NoEcho: true
+
+  WithDomain:
+    Type: String
+    Default: "true"
+    AllowedValues: ["true", "false"]
+    Description: 사용자 풀을 갈아끼울 때만 false 로 한 번 배포(도메인 이름을 그대로 쓰기 위해), 그 뒤 true 로 다시 배포
 
 Conditions:
   HasKakao: !Not [!Equals [!Ref KakaoClientId, ""]]
+  HasGoogle: !Not [!Equals [!Ref GoogleClientId, ""]]
+  WithDomain: !Equals [!Ref WithDomain, "true"]
 
 Resources:
   # ── 로그인 ──────────────────────────────────────────
-  UserPool:
+  # v3: 아이디(자유 문자열) + 비밀번호. 이메일을 받지 않으므로 가입 즉시 확정(PreSignUp 람다)하고,
+  # 비밀번호 분실은 관리자가 admin-set-user-password 로 처리한다.
+  UserPoolV3:
     Type: AWS::Cognito::UserPool
     DeletionPolicy: Retain
     UpdateReplacePolicy: Retain
     Properties:
-      UserPoolName: maeum-ledger
-      UsernameAttributes: [email]
-      AutoVerifiedAttributes: [email]
+      UserPoolName: maeum-ledger-v3
       UsernameConfiguration:
         CaseSensitive: false
       DeletionProtection: ACTIVE
       Schema:
-        - Name: email
-          Required: true
+        - Name: nickname
+          Required: false
           Mutable: true
       Policies:
         PasswordPolicy:
@@ -51,45 +67,98 @@ Resources:
           RequireSymbols: false
       AccountRecoverySetting:
         RecoveryMechanisms:
-          - Name: verified_email
+          - Name: admin_only
             Priority: 1
-      EmailConfiguration:
-        EmailSendingAccount: COGNITO_DEFAULT
-      VerificationMessageTemplate:
-        DefaultEmailOption: CONFIRM_WITH_CODE
-        EmailSubject: "[마음장부] 인증번호"
-        EmailMessage: "마음장부 인증번호는 {####} 입니다."
       AdminCreateUserConfig:
         AllowAdminCreateUserOnly: false
+      LambdaConfig:
+        PreSignUp: !GetAtt AutoConfirmFn.Arn
+
+  AutoConfirmRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: { Service: lambda.amazonaws.com }
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+
+  AutoConfirmFn:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: maeum-ledger-auto-confirm
+      Runtime: nodejs20.x
+      Handler: index.handler
+      Role: !GetAtt AutoConfirmRole.Arn
+      Timeout: 5
+      Code:
+        ZipFile: |
+          exports.handler = async (event) => {
+            event.response.autoConfirmUser = true;
+            return event;
+          };
+
+  AutoConfirmPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref AutoConfirmFn
+      Action: lambda:InvokeFunction
+      Principal: cognito-idp.amazonaws.com
+      SourceArn: !GetAtt UserPoolV3.Arn
 
   KakaoProvider:
     Type: AWS::Cognito::UserPoolIdentityProvider
     Condition: HasKakao
     Properties:
-      UserPoolId: !Ref UserPool
+      UserPoolId: !Ref UserPoolV3
       ProviderName: Kakao
       ProviderType: OIDC
       ProviderDetails:
         client_id: !Ref KakaoClientId
         client_secret: !Ref KakaoClientSecret
-        authorize_scopes: "openid account_email profile_nickname"
+        authorize_scopes: "openid profile_nickname"
         attributes_request_method: GET
         oidc_issuer: https://kauth.kakao.com
       AttributeMapping:
-        email: email
         username: sub
+        nickname: nickname
+        picture: picture
+
+  GoogleProvider:
+    Type: AWS::Cognito::UserPoolIdentityProvider
+    Condition: HasGoogle
+    Properties:
+      UserPoolId: !Ref UserPoolV3
+      ProviderName: Google
+      ProviderType: Google
+      ProviderDetails:
+        client_id: !Ref GoogleClientId
+        client_secret: !Ref GoogleClientSecret
+        authorize_scopes: "openid profile"
+      AttributeMapping:
+        username: sub
+        nickname: name
+        picture: picture
 
   UserPoolClient:
     Type: AWS::Cognito::UserPoolClient
     Properties:
       ClientName: web
-      UserPoolId: !Ref UserPool
+      UserPoolId: !Ref UserPoolV3
       GenerateSecret: false
       PreventUserExistenceErrors: ENABLED
       ExplicitAuthFlows:
         - ALLOW_USER_SRP_AUTH
         - ALLOW_REFRESH_TOKEN_AUTH
-      SupportedIdentityProviders: !If [HasKakao, [COGNITO, !Ref KakaoProvider], [COGNITO]]
+      ReadAttributes: [nickname, picture]
+      WriteAttributes: [nickname, picture]
+      SupportedIdentityProviders:
+        - COGNITO
+        - !If [HasKakao, !Ref KakaoProvider, !Ref AWS::NoValue]
+        - !If [HasGoogle, !Ref GoogleProvider, !Ref AWS::NoValue]
       AllowedOAuthFlowsUserPoolClient: true
       AllowedOAuthFlows: [code]
       AllowedOAuthScopes: [openid, email, profile, aws.cognito.signin.user.admin]
@@ -101,9 +170,10 @@ Resources:
 
   UserPoolDomain:
     Type: AWS::Cognito::UserPoolDomain
+    Condition: WithDomain
     Properties:
-      Domain: !Sub "maeum-${AWS::AccountId}"
-      UserPoolId: !Ref UserPool
+      Domain: !Sub "heartledger-${AWS::AccountId}"
+      UserPoolId: !Ref UserPoolV3
 
   IdentityPool:
     Type: AWS::Cognito::IdentityPool
@@ -112,7 +182,7 @@ Resources:
       AllowUnauthenticatedIdentities: false
       CognitoIdentityProviders:
         - ClientId: !Ref UserPoolClient
-          ProviderName: !GetAtt UserPool.ProviderName
+          ProviderName: !GetAtt UserPoolV3.ProviderName
 
   # ── 데이터 ──────────────────────────────────────────
   Table:
@@ -183,7 +253,7 @@ Outputs:
   Region:
     Value: !Ref AWS::Region
   UserPoolId:
-    Value: !Ref UserPool
+    Value: !Ref UserPoolV3
   UserPoolClientId:
     Value: !Ref UserPoolClient
   IdentityPoolId:
@@ -191,6 +261,8 @@ Outputs:
   TableName:
     Value: !Ref Table
   AuthDomain:
-    Value: !Sub "maeum-${AWS::AccountId}.auth.${AWS::Region}.amazoncognito.com"
+    Value: !Sub "heartledger-${AWS::AccountId}.auth.${AWS::Region}.amazoncognito.com"
   KakaoEnabled:
     Value: !If [HasKakao, "1", "0"]
+  GoogleEnabled:
+    Value: !If [HasGoogle, "1", "0"]

@@ -8,21 +8,23 @@ import { cloudEnabled, configureAmplify } from "./amplify";
 export type AuthState =
   | { status: "loading" }
   | { status: "out" }
-  | { status: "in"; /** 아이덴티티 ID — DB 의 pk. 클라우드 미설정이면 null */ user: string | null; email: string | null };
+  | { status: "in"; /** 아이덴티티 ID — DB 의 pk. 클라우드 미설정이면 null */ user: string | null; username: string | null; nickname: string | null };
 
 export function useAuth() {
   const [state, setState] = useState<AuthState>({ status: "loading" });
 
   const refresh = useCallback(async () => {
     if (!cloudEnabled) {
-      setState({ status: "in", user: null, email: null });
+      setState({ status: "in", user: null, username: null, nickname: null });
       return;
     }
     try {
-      await getCurrentUser();
-      const [session, attrs] = await Promise.all([fetchAuthSession(), fetchUserAttributes().catch(() => ({}) as { email?: string })]);
+      const me = await getCurrentUser();
+      const [session, attrs] = await Promise.all([fetchAuthSession(), fetchUserAttributes().catch(() => ({}) as { nickname?: string })]);
       if (!session.identityId) throw new Error("no identity");
-      setState({ status: "in", user: session.identityId, email: attrs.email ?? null });
+      // 소셜로 들어온 사람의 username 은 "kakao_…"/"google_…" 라서 보여 주지 않는다
+      const username = /^(kakao|google)_/i.test(me.username) ? null : me.username;
+      setState({ status: "in", user: session.identityId, username, nickname: attrs.nickname ?? null });
     } catch {
       setState({ status: "out" });
     }
@@ -55,9 +57,9 @@ export function authMessage(e: unknown): string {
   switch (name) {
     case "NotAuthorizedException":
     case "UserNotFoundException":
-      return "이메일 또는 비밀번호가 맞지 않아요.";
+      return "아이디 또는 비밀번호가 맞지 않아요.";
     case "UsernameExistsException":
-      return "이미 가입된 이메일이에요. 로그인해 주세요.";
+      return "이미 사용 중인 아이디예요.";
     case "InvalidPasswordException":
       return "비밀번호는 8자 이상이어야 해요.";
     case "InvalidParameterException":

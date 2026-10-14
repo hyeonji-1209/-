@@ -12,6 +12,7 @@ export const env = {
   table: process.env.NEXT_PUBLIC_TABLE ?? "maeum-ledger",
   authDomain: process.env.NEXT_PUBLIC_AUTH_DOMAIN ?? "",
   kakao: process.env.NEXT_PUBLIC_KAKAO === "1",
+  google: process.env.NEXT_PUBLIC_GOOGLE === "1",
 };
 
 export const cloudEnabled = !!(env.userPoolId && env.clientId && env.identityPoolId);
@@ -28,7 +29,7 @@ export function configureAmplify() {
         userPoolClientId: env.clientId,
         identityPoolId: env.identityPoolId,
         loginWith: {
-          email: true,
+          username: true,
           ...(env.authDomain
             ? {
                 oauth: {
@@ -37,7 +38,7 @@ export function configureAmplify() {
                   redirectSignIn: [here],
                   redirectSignOut: [here],
                   responseType: "code" as const,
-                  providers: [{ custom: "Kakao" }],
+                  providers: ["Google", { custom: "Kakao" }],
                 },
               }
             : {}),
