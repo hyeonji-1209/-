@@ -11,9 +11,10 @@ interface Props {
   gift: Gift;
   onClose: () => void;
   onSave: (patch: GiftDetails) => void;
+  onDelete: () => void;
 }
 
-export default function EditSheet({ ledger, gift, onClose, onSave }: Props) {
+export default function EditSheet({ ledger, gift, onClose, onSave, onDelete }: Props) {
   const [name, setName] = useState(gift.name);
   const [relation, setRelation] = useState(gift.relation);
   const [amount, setAmount] = useState(String(gift.amount / 10000));
@@ -47,7 +48,9 @@ export default function EditSheet({ ledger, gift, onClose, onSave }: Props) {
           <RelationChips relations={relations} value={relation} onChange={setRelation} onAdd={ledger.addRelation} onRemove={ledger.removeRelation} />
         </div>
         <div className="event-form-foot">
-          <span />
+          <button type="button" className="link-danger" onClick={onDelete}>
+            기록 삭제
+          </button>
           <button type="submit" className="btn primary" disabled={!ready}>
             저장
           </button>

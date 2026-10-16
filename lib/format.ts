@@ -71,3 +71,24 @@ export function clockLabel(clock: string): string {
 /** 행사 시간 고르기 목록: 30분 간격 */
 export const TIME_OPTIONS: string[] = [];
 for (let h = 6; h <= 22; h++) for (const m of ["00", "30"]) TIME_OPTIONS.push(`${String(h).padStart(2, "0")}:${m}`);
+
+/** "2027-04-10", "12:00" → "2027.04.10 (토) 오후 12:00" (행사 목록용) */
+export function dotWhen(date: string, clock?: string): string {
+  const [y, m, d] = date.split("-").map(Number);
+  if (!y) return "";
+  const s = `${shortDate(date)} (${WEEKDAYS[new Date(y, m - 1, d).getDay()]})`;
+  return clock ? `${s} ${clockLabel(clock)}` : s;
+}
+
+/** 적은 때를 짧게: "방금" · "오늘" · "어제" · "10.14" · 해가 다르면 "25.10.14" */
+export function relDay(ts: number, now = Date.now()): string {
+  if (now - ts < 60_000) return "방금";
+  const a = new Date(ts);
+  const b = new Date(now);
+  const day = (x: Date) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
+  const diff = Math.round((day(b) - day(a)) / 86_400_000);
+  if (diff === 0) return "오늘";
+  if (diff === 1) return "어제";
+  const md = `${a.getMonth() + 1}.${a.getDate()}`;
+  return a.getFullYear() === b.getFullYear() ? md : `${String(a.getFullYear()).slice(2)}.${md}`;
+}

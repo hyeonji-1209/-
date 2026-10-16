@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useRef, useState, type CSSProperties } from "react";
 import { EVENT_TYPES, typeInfo, type EventType } from "@/lib/events";
 import { TIME_OPTIONS, clockLabel, dotDate, maskDate, parseDate, today } from "@/lib/format";
 import { fileToCover } from "@/lib/image";
@@ -94,6 +94,23 @@ export default function EventModal({ event, giftCount = 0, onClose, onSave, onDe
           <input id="event-place" className="line-input" value={place} onChange={(e) => setPlace(e.target.value)} placeholder="예: 서울 강남" />
         </label>
 
+        <div className="field">
+          <span>대표 사진 (선택)</span>
+          <span className="cover-pick">
+            <span className="thumb" style={{ "--cover": typeInfo(type).cover } as CSSProperties}>
+              {cover && <img src={cover} alt="" />}
+            </span>
+            <button type="button" className="mini" onClick={() => fileRef.current?.click()}>
+              {cover ? "다른 사진" : "사진 고르기"}
+            </button>
+            {cover && (
+              <button type="button" className="mini" onClick={() => setCover(undefined)}>
+                빼기
+              </button>
+            )}
+          </span>
+        </div>
+
         <div className="event-form-foot">
           {editing && onDelete ? (
             <button
@@ -104,12 +121,7 @@ export default function EventModal({ event, giftCount = 0, onClose, onSave, onDe
               {confirmDelete ? (giftCount ? `기록 ${giftCount}건까지 모두 삭제` : "정말 삭제") : "행사 삭제"}
             </button>
           ) : (
-            <span className="hint">
-              대표 사진은 카드에 끌어다 놓거나{" "}
-              <button type="button" className="link" onClick={() => fileRef.current?.click()}>
-                {cover ? "다시 고르기" : "여기서 고르기"}
-              </button>
-            </span>
+            <span />
           )}
           <input
             ref={fileRef}

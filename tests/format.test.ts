@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { clockLabel, fullWhen, maskDate, money, parseDate, parseMan } from "../lib/format.ts";
+import { clockLabel, dotWhen, fullWhen, maskDate, money, parseDate, parseMan, relDay } from "../lib/format.ts";
 
 test("money: 만원 단위로 줄여 보여 준다", () => {
   assert.equal(money(0), "0만원");
@@ -45,4 +45,19 @@ test("fullWhen / clockLabel: 오전·오후와 요일", () => {
   assert.equal(fullWhen(""), "");
   assert.equal(clockLabel("00:30"), "오전 12:30");
   assert.equal(clockLabel("13:30"), "오후 1:30");
+});
+
+test("dotWhen: 목록용 날짜", () => {
+  assert.equal(dotWhen("2027-04-10", "12:00"), "2027.04.10 (토) 오후 12:00");
+  assert.equal(dotWhen("2026-11-02"), "2026.11.02 (월)");
+  assert.equal(dotWhen(""), "");
+});
+
+test("relDay: 방금 · 오늘 · 어제 · 날짜", () => {
+  const now = new Date(2026, 9, 16, 15, 0).getTime();
+  assert.equal(relDay(now - 10_000, now), "방금");
+  assert.equal(relDay(new Date(2026, 9, 16, 9, 0).getTime(), now), "오늘");
+  assert.equal(relDay(new Date(2026, 9, 15, 23, 0).getTime(), now), "어제");
+  assert.equal(relDay(new Date(2026, 9, 3).getTime(), now), "10.3");
+  assert.equal(relDay(new Date(2025, 11, 31).getTime(), now), "25.12.31");
 });

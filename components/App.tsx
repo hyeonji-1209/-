@@ -1,14 +1,25 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { useKeyboardOpen } from "@/lib/keyboard";
+import { useEffect, useRef, useState } from "react";
 import { useLedger } from "@/lib/ledger";
-import EventCards from "./EventCards";
 import EventModal from "./EventModal";
+import Home from "./Home";
 import LedgerPanel from "./LedgerPanel";
 import { useToast } from "./Toast";
 
 type Modal = null | "new" | "edit";
+
+/** 첫 화면 · 행사 하나 · 전체 기록. 주소(?e=행사ID, ?v=all)에도 두어 폰의 뒤로 가기·새로고침이 자연스럽다 */
+type View = { page: "home" } | { page: "event"; id: string } | { page: "all" };
+const HOME: View = { page: "home" };
+
+function readView(): View {
+  const q = new URLSearchParams(window.location.search);
+  const id = q.get("e");
+  if (id) return { page: "event", id };
+  return q.get("v") === "all" ? { page: "all" } : HOME;
+}
+const urlOf = (v: View) => (v.page === "event" ? `?e=${encodeURIComponent(v.id)}` : v.page === "all" ? "?v=all" : window.location.pathname);
 
 interface Props {
   /** 로그인한 사람의 아이덴티티 ID. 클라우드 미설정이면 null */
@@ -23,16 +34,41 @@ export default function App({ user, username, nickname, onSignOut }: Props) {
   const ledger = useLedger(user);
   const toast = useToast();
   const [modal, setModal] = useState<Modal>(null);
-  const keyboard = useKeyboardOpen();
   const [justCreated, setJustCreated] = useState<string | null>(null);
+  const [view, setView] = useState<View>(readView);
+  /** 이 앱 안에서 들어온 화면이면 ‹ 는 브라우저 뒤로 가기와 같다 */
+  const pushed = useRef(false);
 
-  const { events, gifts, currentEventId } = ledger.data;
-  const current = events.find((e) => e.id === currentEventId) ?? null;
+  const { events, gifts } = ledger.data;
+  const current = view.page === "event" ? (events.find((e) => e.id === view.id) ?? null) : null;
+
+  useEffect(() => {
+    const onPop = () => setView(readView());
+    window.addEventListener("popstate", onPop);
+    return () => window.removeEventListener("popstate", onPop);
+  }, []);
 
   useEffect(() => {
     if (ledger.migrated) toast.show(`이 기기에 있던 기록 ${ledger.migrated}건을 계정으로 옮겼어요.`);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ledger.migrated]);
+
+  function go(v: View) {
+    window.history.pushState(null, "", urlOf(v));
+    pushed.current = true;
+    setView(v);
+    window.scrollTo(0, 0);
+  }
+
+  function back() {
+    if (pushed.current) {
+      window.history.back();
+      return;
+    }
+    // 주소로 바로 들어왔으면 뒤로 갈 곳이 이 앱이 아니다 — 첫 화면으로 바꿔 끼운다
+    window.history.replaceState(null, "", urlOf(HOME));
+    setView(HOME);
+  }
 
   /** 밀린 변경을 먼저 보내 보고, 그래도 남으면 물어본 뒤 이 기기의 사본까지 지우고 나간다 */
   async function signOut() {
@@ -45,46 +81,48 @@ export default function App({ user, username, nickname, onSignOut }: Props) {
 
   if (!ledger.ready) return <div className="app" />;
 
+  // 지워졌거나 다른 기기에서 없앤 행사 주소면 첫 화면을 보여 준다
+  const page = view.page === "event" && !current ? "home" : view.page;
+
   return (
-    <div className="app" >
-      <nav className="topnav">
-        <div className="topnav-inner">
-          <span className="brand">
-            <img className="brand-mark" src="/brand.png" alt="" />
-            <span className="brand-name">마음장부</span>
-          </span>
-          {/* 폰에서는 이 둘이 아래 고정 바로 내려간다 (.topnav .pill.nav-main 숨김) */}
-          <button type="button" className={`pill nav-main${current ? "" : " active"}`} onClick={() => ledger.openEvent(null)} aria-label="전체 기록">
-            <ListIcon />
-            <span className="pill-text">전체 기록</span>
-          </button>
-          <button type="button" className="pill solid nav-main" onClick={() => setModal("new")} aria-label="새 행사">
-            <PlusIcon />
-            <span className="pill-text">+ 새 행사</span>
-          </button>
-          {onSignOut && (
-            <span className="who">
-              {who && <span className="who-name">{who}님</span>}
-              <button type="button" className="pill ghost" onClick={signOut} title={username ?? undefined} aria-label="로그아웃">
-                <ExitIcon />
-                <span className="pill-text">로그아웃</span>
-              </button>
+    <div className="app">
+      <nav className="wrap nav">
+        {page === "home" ? (
+          <>
+            <span className="brand">
+              <img className="brand-mark" src="/brand.png" alt="" />
+              마음장부
             </span>
-          )}
-        </div>
+            {onSignOut && (
+              <span className="nav-r">
+                {who && <b>{who}</b>}
+                <button type="button" onClick={signOut} title={username ?? undefined}>
+                  로그아웃
+                </button>
+              </span>
+            )}
+          </>
+        ) : (
+          <>
+            <button type="button" className="back" onClick={back}>
+              ‹ 내 행사
+            </button>
+            <img className="brand-mark" src="/brand.png" alt="마음장부" />
+          </>
+        )}
       </nav>
 
-      {
-        ledger.expired && onSignOut ? (
-          <div className="save-error" role="alert">
-            로그인이 만료됐어요. 다시 로그인하면 밀린 기록도 저장돼요.{" "}
-            {/* 사본·대기열은 지우지 않는다 — 같은 계정으로 다시 들어오면 이어서 보낸다 */}
-            <button type="button" className="link" onClick={onSignOut}>
-              다시 로그인
-            </button>
-          </div>
-        ) : (ledger.saveFailed || ledger.loadFailed) && (
-          <div className="save-error" role="alert">
+      {ledger.expired && onSignOut ? (
+        <div className="wrap save-error" role="alert">
+          로그인이 만료됐어요. 다시 로그인하면 밀린 기록도 저장돼요.{" "}
+          {/* 사본·대기열은 지우지 않는다 — 같은 계정으로 다시 들어오면 이어서 보낸다 */}
+          <button type="button" className="link" onClick={onSignOut}>
+            다시 로그인
+          </button>
+        </div>
+      ) : (
+        (ledger.saveFailed || ledger.loadFailed) && (
+          <div className="wrap save-error" role="alert">
             {!ledger.cloud
               ? "이 브라우저에 저장하지 못하고 있어요. 시크릿 모드라면 일반 창에서 열어 주세요."
               : ledger.saveFailed
@@ -92,113 +130,62 @@ export default function App({ user, username, nickname, onSignOut }: Props) {
                 : "계정에서 기록을 불러오지 못했어요. 이 기기에 있던 사본을 보여 주고 있어요."}
           </div>
         )
-      }
+      )}
 
-      <section className="hero">
-        <div className="hero-copy">
-          <span className="hero-label">My Events</span>
-          <h2>
-            주고받은 마음을
-            <br />
-            <b>한곳에 모아두세요</b>
-          </h2>
-          <p>
-            행사를 고르면 아래에서 바로{" "}
-            <br />
-            방명록을 적을 수 있어요.
-          </p>
-          <div>
-            <button type="button" className="pill outline" onClick={() => setModal("new")}>
-              새 행사 만들기 →
-            </button>
-          </div>
-        </div>
-        <EventCards
+      {page === "home" ? (
+        <Home
           events={events}
           gifts={gifts}
-          currentId={current?.id ?? null}
-          onSelect={(id) => {
+          onOpen={(id) => {
             setJustCreated(null);
-            ledger.openEvent(id);
+            go({ page: "event", id });
           }}
+          onAll={() => go({ page: "all" })}
           onNew={() => setModal("new")}
           onCover={(id, cover) => ledger.updateEvent(id, { cover })}
           toast={toast.show}
         />
-      </section>
+      ) : (
+        <LedgerPanel
+          key={current?.id ?? "all"}
+          ledger={ledger}
+          event={current}
+          focusName={!!current && justCreated === current.id}
+          onEdit={() => setModal("edit")}
+          toast={toast.show}
+        />
+      )}
 
-      <LedgerPanel ledger={ledger} event={current} focusName={!!current && justCreated === current.id} onEdit={() => setModal("edit")} toast={toast.show} />
-
-      {/* 폰: 아래 고정 바. 키패드가 올라오면 숨긴다 */}
-      <nav className={`bottombar${keyboard ? " hidden" : ""}`} aria-label="주요 메뉴">
-        <button type="button" className={current ? "" : "active"} onClick={() => ledger.openEvent(null)}>
-          <ListIcon />
-          <span>전체 기록</span>
-        </button>
-        <button type="button" className="solid" onClick={() => setModal("new")}>
-          <PlusIcon />
-          <span>새 행사</span>
-        </button>
-      </nav>
-
-      <footer className="foot">
-        {ledger.cloud ? `${who ?? "내"} 계정에 저장돼요` : "이 기기에만 저장돼요"} · 기록은 ‘엑셀로 다운받기’로 꺼낼 수 있어요
-      </footer>
-
-      {
-        modal === "new" && (
-          <EventModal
-            onClose={() => setModal(null)}
-            onSave={(details) => {
-              const e = ledger.createEvent(details);
-              setJustCreated(e.id);
-              setModal(null);
-            }}
-          />
-        )
-      }
-      {
-        modal === "edit" && current && (
-          <EventModal
-            event={current}
-            giftCount={gifts.filter((g) => g.eventId === current.id).length}
-            onClose={() => setModal(null)}
-            onSave={(details) => {
-              ledger.updateEvent(current.id, details);
-              setModal(null);
-              toast.show("행사 정보를 고쳤어요.");
-            }}
-            onDelete={() => {
-              ledger.deleteEvent(current.id);
-              setModal(null);
-              toast.show(`${current.title} 행사를 지웠어요.`);
-            }}
-          />
-        )
-      }
+      {modal === "new" && (
+        <EventModal
+          onClose={() => setModal(null)}
+          onSave={(details) => {
+            const e = ledger.createEvent(details);
+            setJustCreated(e.id);
+            setModal(null);
+            go({ page: "event", id: e.id });
+          }}
+        />
+      )}
+      {modal === "edit" && current && (
+        <EventModal
+          event={current}
+          giftCount={gifts.filter((g) => g.eventId === current.id).length}
+          onClose={() => setModal(null)}
+          onSave={(details) => {
+            ledger.updateEvent(current.id, details);
+            setModal(null);
+            toast.show("행사 정보를 고쳤어요.");
+          }}
+          onDelete={() => {
+            ledger.deleteEvent(current.id);
+            setModal(null);
+            toast.show(`${current.title} 행사를 지웠어요.`);
+            back();
+          }}
+        />
+      )}
       {toast.node}
-    </div >
-  );
-}
-
-function ListIcon() {
-  return (
-    <svg className="pill-icon" viewBox="0 0 24 24" aria-hidden="true">
-      <path d="M4 7h16M4 12h16M4 17h10" />
-    </svg>
-  );
-}
-function PlusIcon() {
-  return (
-    <svg className="pill-icon" viewBox="0 0 24 24" aria-hidden="true">
-      <path d="M12 5v14M5 12h14" />
-    </svg>
-  );
-}
-function ExitIcon() {
-  return (
-    <svg className="pill-icon" viewBox="0 0 24 24" aria-hidden="true">
-      <path d="M10 4H5v16h5M14 8l4 4-4 4M8 12h10" />
-    </svg>
+    </div>
   );
 }
