@@ -51,29 +51,3 @@ export function useAuth() {
   return { ...state, refresh, signOut };
 }
 
-/** Cognito 오류를 사람이 읽을 말로 */
-export function authMessage(e: unknown): string {
-  const name = (e as { name?: string })?.name ?? "";
-  switch (name) {
-    case "NotAuthorizedException":
-    case "UserNotFoundException":
-      return "아이디 또는 비밀번호가 맞지 않아요.";
-    case "UsernameExistsException":
-      return "이미 사용 중인 아이디예요.";
-    case "InvalidPasswordException":
-      return "비밀번호는 8자 이상이어야 해요.";
-    case "InvalidParameterException":
-      return "입력값을 다시 확인해 주세요.";
-    case "CodeMismatchException":
-      return "인증번호가 맞지 않아요.";
-    case "ExpiredCodeException":
-      return "인증번호가 만료됐어요. 다시 보내 주세요.";
-    case "LimitExceededException":
-    case "TooManyRequestsException":
-      return "시도가 너무 많아요. 잠시 후 다시 해 주세요.";
-    case "NetworkError":
-      return "인터넷 연결을 확인해 주세요.";
-    default:
-      return (e as Error)?.message || "문제가 생겼어요. 다시 시도해 주세요.";
-  }
-}

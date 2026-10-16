@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react"
 import { typeInfo } from "@/lib/events";
 import { fullWhen, money, parseMan } from "@/lib/format";
 import type { Gift, Ledger, LedgerEvent } from "@/lib/ledger";
-import { downloadBlob, makeXlsx } from "@/lib/xlsx";
+import { downloadBlob, makeXlsx, type Cell } from "@/lib/xlsx";
 import EditSheet from "./EditSheet";
 import RelationChips from "./RelationChips";
 import SearchBox from "./SearchBox";
@@ -23,6 +23,36 @@ export default function LedgerPanel({ ledger, event, focusName, onEdit, toast }:
   const { events, gifts } = ledger.data;
   const [q, setQ] = useState("");
   const [editing, setEditing] = useState<Gift | null>(null);
+  /** 최근순 | 관계별 — 한 번 고르면 기억한다 */
+  const [mode, setMode] = useState<"recent" | "relation">(() => {
+    try {
+      return localStorage.getItem("maeum-ledger.listMode") === "recent" ? "recent" : "relation";
+    } catch {
+      return "relation";
+    }
+  });
+  function pickMode(m: "recent" | "relation") {
+    setMode(m);
+    try {
+      localStorage.setItem("maeum-ledger.listMode", m);
+    } catch {
+      /* ignore */
+    }
+  }
+  const { relations } = ledger.data;
+  /** 관계 버튼 순서대로, 목록에 없는 관계는 뒤에 */
+  const relOrder = (r: string) => {
+    const i = relations.indexOf(r);
+    return i === -1 ? relations.length : i;
+  };
+  /** 관계 → 그 관계의 기록(적은 순서) */
+  function groupByRelation(list: Gift[]): { relation: string; items: Gift[]; total: number }[] {
+    const map = new Map<string, Gift[]>();
+    for (const g of [...list].sort((a, b) => a.createdAt - b.createdAt)) map.set(g.relation, [...(map.get(g.relation) ?? []), g]);
+    return [...map.entries()]
+      .sort((a, b) => relOrder(a[0]) - relOrder(b[0]) || a[0].localeCompare(b[0], "ko"))
+      .map(([relation, items]) => ({ relation, items, total: items.reduce((s, g) => s + g.amount, 0) }));
+  }
   const eventOf = useMemo(() => new Map(events.map((e) => [e.id, e])), [events]);
 
   const scope = useMemo(
@@ -33,18 +63,50 @@ export default function LedgerPanel({ ledger, event, focusName, onEdit, toast }:
   const rows = term ? scope.filter((g) => g.name.includes(term) || (!event && eventOf.get(g.eventId)?.title.includes(term))) : scope;
   const total = scope.reduce((s, g) => s + g.amount, 0);
 
+  /** 관계별로 묶고, 관계마다 소계 줄을 넣는다. 금액은 숫자 칸이라 엑셀에서 콤마가 붙는다 */
   function downloadExcel() {
     const title = event ? event.title : "전체 기록";
-    const list = [...scope].reverse(); // 적은 순서대로
-    const head = event ? ["이름", "관계", "금액(원)"] : ["이름", "관계", "금액(원)", "행사", "날짜"];
-    const body = list.map((g) => {
-      const e = eventOf.get(g.eventId);
-      return event ? [g.name, g.relation, g.amount] : [g.name, g.relation, g.amount, e?.title ?? "", e?.date ?? ""];
-    });
-    const sum = ["합계", `${scope.length}명`, total, ...(event ? [] : ["", ""])];
-    const info = event ? [[event.title, [fullWhen(event.date, event.time), event.place].filter(Boolean).join(" · ")], []] : [];
-    downloadBlob(`마음장부_${title}.xlsx`, makeXlsx(title, [...info, head, ...body, [], sum], event ? [16, 10, 14] : [16, 10, 14, 24, 12]));
+    const extra = event ? [] : ["", ""];
+    const head: Cell[] = (event ? ["이름", "관계", "금액(원)"] : ["이름", "관계", "금액(원)", "행사", "날짜"]).map((v) => ({ v, bold: true }));
+    const body: Cell[][] = [];
+    for (const grp of groupByRelation(scope)) {
+      for (const g of grp.items) {
+        const e = eventOf.get(g.eventId);
+        body.push(event ? [g.name, g.relation, g.amount] : [g.name, g.relation, g.amount, e?.title ?? "", e?.date ?? ""]);
+      }
+      body.push([{ v: `${grp.relation} 소계`, bold: true }, { v: `${grp.items.length}명`, bold: true }, { v: grp.total, bold: true }, ...extra], []);
+    }
+    const sum: Cell[] = [{ v: "합계", bold: true }, { v: `${scope.length}명`, bold: true }, { v: total, bold: true }, ...extra];
+    const info: Cell[][] = event ? [[{ v: event.title, bold: true }, [fullWhen(event.date, event.time), event.place].filter(Boolean).join(" · ")], []] : [];
+    downloadBlob(`마음장부_${title}.xlsx`, makeXlsx(title, [...info, head, ...body, sum], event ? [16, 12, 14] : [16, 12, 14, 24, 12]));
     toast("엑셀 파일로 내려받았어요.");
+  }
+
+  function renderRow(g: Gift, inGroup = false) {
+    return (
+      <li key={g.id} className="row">
+        <button type="button" className="row-name" onClick={() => setEditing(g)} title="고치기">
+          {g.name}
+        </button>
+        {/* 관계별로 묶여 있고 행사 안이면 관계는 머리글에 있으니 생략 */}
+        <span className="row-rel">{event ? (inGroup ? "" : g.relation) : `${inGroup ? "" : g.relation + " · "}${eventOf.get(g.eventId)?.title ?? "삭제된 행사"}`}</span>
+        <span className="row-amt num">{money(g.amount)}</span>
+        <button type="button" className="row-edit" onClick={() => setEditing(g)}>
+          수정
+        </button>
+        <button
+          type="button"
+          className="row-del"
+          aria-label={`${g.name} 기록 삭제`}
+          onClick={() => {
+            ledger.removeGift(g.id);
+            toast(`${g.name} 기록을 지웠어요.`, { label: "되돌리기", run: () => ledger.restoreGift(g) });
+          }}
+        >
+          ×
+        </button>
+      </li>
+    );
   }
 
   return (
@@ -78,6 +140,14 @@ export default function LedgerPanel({ ledger, event, focusName, onEdit, toast }:
             <span className="num">방명록 {rows.length}</span>
             {scope.length > 0 && (
               <div className="list-tools">
+                <div className="seg" role="radiogroup" aria-label="정렬">
+                  <button type="button" role="radio" aria-checked={mode === "relation"} onClick={() => pickMode("relation")}>
+                    관계별
+                  </button>
+                  <button type="button" role="radio" aria-checked={mode === "recent"} onClick={() => pickMode("recent")}>
+                    최근순
+                  </button>
+                </div>
                 <button type="button" className="link-muted" onClick={downloadExcel}>
                   엑셀로 다운받기
                 </button>
@@ -96,28 +166,25 @@ export default function LedgerPanel({ ledger, event, focusName, onEdit, toast }:
                     ? "첫 번째 마음을 적어보세요"
                     : "아직 기록이 없어요"}
             </p>
-          ) : (
+          ) : mode === "relation" ? (
             <ul className="rows">
-              {rows.map((g) => (
-                <li key={g.id} className="row">
-                  <button type="button" className="row-name" onClick={() => setEditing(g)} title="고치기">
-                    {g.name}
-                  </button>
-                  <span className="row-rel">{event ? g.relation : `${g.relation} · ${eventOf.get(g.eventId)?.title ?? "삭제된 행사"}`}</span>
-                  <span className="row-amt num">{money(g.amount)}</span>
-                  <button
-                    type="button"
-                    className="row-del"
-                    aria-label={`${g.name} 기록 삭제`}
-                    onClick={() => {
-                      ledger.removeGift(g.id);
-                      toast(`${g.name} 기록을 지웠어요.`, { label: "되돌리기", run: () => ledger.restoreGift(g) });
-                    }}
-                  >
-                    ×
-                  </button>
+              {groupByRelation(rows).map((grp) => (
+                <li key={grp.relation} className="group">
+                  <div className="group-head">
+                    <span>{grp.relation}</span>
+                    <span className="num">
+                      {grp.items.length}명 · {money(grp.total)}
+                    </span>
+                  </div>
+                  <ul>
+                    {grp.items.map((g) => renderRow(g, true))}
+                  </ul>
                 </li>
               ))}
+            </ul>
+          ) : (
+            <ul className="rows">
+              {rows.map((g) => renderRow(g))}
             </ul>
           )}
         </div>

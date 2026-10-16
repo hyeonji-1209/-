@@ -35,11 +35,11 @@ export type GiftDetails = Pick<Gift, "name" | "amount" | "relation">;
 export interface LedgerData {
   events: LedgerEvent[];
   gifts: Gift[];
-  /** 마지막으로 보던 행사. null이면 전체 기록 */
+  /** 마지막으로 보던 행사. null이면 전체 기록. 이 기기에만 저장 */
   currentEventId: string | null;
   /** 관계 버튼 목록 — 직접 더하거나 지울 수 있다 */
   relations: string[];
-  /** 마지막으로 고른 관계. 손님은 무리지어 오니 바꾸기 전까지 그대로 둔다 */
+  /** 마지막으로 고른 관계. 손님은 무리지어 오니 바꾸기 전까지 그대로 둔다. 이 기기에만 저장 */
   lastRelation?: string;
 }
 
@@ -78,7 +78,8 @@ function readPending(key: string): cloud.Op[] {
 }
 
 const newId = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
-const metaOf = (d: LedgerData): cloud.Meta => ({ relations: d.relations, currentEventId: d.currentEventId, lastRelation: d.lastRelation });
+/** 다른 기기 변경을 받아 오는 간격 (화면이 보일 때만) */
+const SYNC_MS = 30_000;
 
 /**
  * 장부 상태. user 가 있으면 DynamoDB 에 저장하고 이 기기에는 사본만 둔다(바로 뜨게).
@@ -91,12 +92,17 @@ export function useLedger(user: string | null) {
   const [saveFailed, setSaveFailed] = useState(false);
   /** 서버에서 기록을 못 읽어 왔다 — 이 기기의 사본을 보여 주는 중 */
   const [loadFailed, setLoadFailed] = useState(false);
+  /** 로그인이 풀려서 저장·불러오기를 못 하고 있다 */
+  const [expired, setExpired] = useState(false);
   /** 처음 로그인하면서 이 기기 기록을 계정으로 옮긴 건수 */
   const [migrated, setMigrated] = useState(0);
   const dataRef = useRef<LedgerData>(EMPTY);
   /** 아직 클라우드에 반영 못 한 변경들. localStorage 에도 같이 두어 탭을 닫아도 남는다 */
   const pending = useRef<cloud.Op[]>([]);
   const flushing = useRef(false);
+  const syncing = useRef(false);
+  /** 이 기기에서 바꾼 횟수. 불러오는 사이에 바뀌었으면 불러온 것(옛 상태)으로 덮지 않는다 */
+  const version = useRef(0);
 
   const savePending = useCallback(() => {
     try {
@@ -125,8 +131,10 @@ export function useLedger(user: string | null) {
         savePending();
       }
       setSaveFailed(false);
-    } catch {
+      setExpired(false);
+    } catch (e) {
       setSaveFailed(true);
+      setExpired(e instanceof cloud.SessionExpired);
     } finally {
       flushing.current = false;
     }
@@ -146,8 +154,51 @@ export function useLedger(user: string | null) {
     [user],
   );
 
+  /**
+   * 밀린 변경을 보내고 서버 것을 받아 온다. 처음 열 때, 탭으로 돌아올 때, 화면이 보이는 동안 주기적으로.
+   * 행사·기록·관계는 서버 것이 기준이고, 보던 행사·마지막 관계는 이 기기 것을 그대로 둔다.
+   */
+  const sync = useCallback(async () => {
+    if (!user || syncing.current) return;
+    syncing.current = true;
+    try {
+      // 못 보낸 변경이 남아 있으면 서버 것을 받지 않는다(이 기기 변경이 더 최신이니까)
+      await flush();
+      if (pending.current.length) {
+        setLoadFailed(true);
+        return;
+      }
+      const seen = version.current;
+      let remote = await cloud.loadAll();
+      if (!remote) {
+        const local = read(LOCAL_KEY);
+        if (local && (local.events.length || local.gifts.length)) {
+          remote = { events: local.events, gifts: local.gifts, relations: local.relations };
+          await cloud.uploadAll(remote);
+          localStorage.removeItem(LOCAL_KEY);
+          setMigrated(local.gifts.length + local.events.length);
+        } else {
+          // 빈 계정도 관계 버튼은 저장해 둔다 (하나씩 저장하므로 기본 목록이 서버에 있어야 한다)
+          remote = { events: [], gifts: [], relations: DEFAULT_RELATIONS };
+          await cloud.uploadAll(remote);
+        }
+      }
+      if (version.current === seen && !pending.current.length) {
+        const cur = dataRef.current;
+        const currentEventId = remote.events.some((e) => e.id === cur.currentEventId) ? cur.currentEventId : null;
+        commit(normalize({ ...remote, currentEventId, lastRelation: cur.lastRelation }));
+      }
+      setLoadFailed(false);
+      setExpired(false);
+    } catch (e) {
+      setLoadFailed(true);
+      setExpired(e instanceof cloud.SessionExpired);
+    } finally {
+      syncing.current = false;
+    }
+  }, [user, flush, commit]);
+
   useEffect(() => {
-    let alive = true;
     const cached = read(cacheKey(user));
     if (cached) {
       dataRef.current = cached;
@@ -159,48 +210,27 @@ export function useLedger(user: string | null) {
       return;
     }
     pending.current = readPending(pendingKey(user));
-    (async () => {
-      try {
-        // 지난번에 못 보낸 변경부터 보낸다. 아직도 못 보내면 서버 것을 받지 않는다(이 기기 변경이 더 최신이니까)
-        await flush();
-        if (pending.current.length) {
-          if (alive) setLoadFailed(true);
-          return;
-        }
-        let remote = await cloud.loadAll();
-        if (!remote) {
-          const local = read(LOCAL_KEY);
-          if (local && (local.events.length || local.gifts.length)) {
-            await cloud.uploadAll(local);
-            remote = local;
-            localStorage.removeItem(LOCAL_KEY);
-            if (alive) setMigrated(local.gifts.length + local.events.length);
-          } else remote = EMPTY;
-        }
-        if (alive) {
-          // 불러오는 사이에 이 기기에서 바꾼 게 있으면(아직 못 보냈으면) 서버 것으로 덮지 않는다
-          if (!pending.current.length) commit(normalize(remote));
-          setLoadFailed(false);
-        }
-      } catch {
-        if (alive) setLoadFailed(true);
-      } finally {
-        if (alive) setReady(true);
-      }
-    })();
+    void sync().finally(() => setReady(true));
+
+    const visible = () => document.visibilityState === "visible";
     // 인터넷이 돌아오면 밀린 것을 다시 보낸다
     const onOnline = () => void flush();
+    const onVisible = () => visible() && void sync();
+    const timer = setInterval(onVisible, SYNC_MS);
     window.addEventListener("online", onOnline);
+    document.addEventListener("visibilitychange", onVisible);
     return () => {
-      alive = false;
+      clearInterval(timer);
       window.removeEventListener("online", onOnline);
+      document.removeEventListener("visibilitychange", onVisible);
     };
-  }, [user, commit, flush]);
+  }, [user, sync, flush]);
 
   /** 상태를 바꾸고, 로그인 상태면 같은 변경을 클라우드에도 순서대로 보낸다 */
   const mutate = useCallback(
     (fn: (d: LedgerData) => LedgerData, ops?: (next: LedgerData) => cloud.Op[]) => {
       const next = fn(dataRef.current);
+      version.current++;
       commit(next);
       if (user && ops) {
         pending.current = [...pending.current, ...ops(next)];
@@ -222,15 +252,16 @@ export function useLedger(user: string | null) {
       };
       mutate(
         (d) => ({ ...d, events: [...d.events, event], currentEventId: event.id }),
-        (n) => [{ t: "event", item: event }, { t: "meta", meta: metaOf(n) }],
+        () => [{ t: "event", item: event }],
       );
       return event;
     },
     [mutate],
   );
 
+  // 보던 행사는 이 기기에만 둔다 (기기마다 다른 행사를 보고 있을 수 있다)
   const openEvent = useCallback(
-    (id: string | null) => mutate((d) => ({ ...d, currentEventId: id }), (n) => [{ t: "meta", meta: metaOf(n) }]),
+    (id: string | null) => mutate((d) => ({ ...d, currentEventId: id })),
     [mutate],
   );
 
@@ -256,7 +287,7 @@ export function useLedger(user: string | null) {
           gifts: d.gifts.filter((g) => g.eventId !== id),
           currentEventId: d.currentEventId === id ? null : d.currentEventId,
         }),
-        (n) => [{ t: "delEvent", id, giftIds }, { t: "meta", meta: metaOf(n) }],
+        () => [{ t: "delEvent", id, giftIds }],
       );
     },
     [mutate],
@@ -267,7 +298,7 @@ export function useLedger(user: string | null) {
       const gift: Gift = { id: newId(), eventId, ...details, createdAt: Date.now() };
       mutate(
         (d) => ({ ...d, gifts: [...d.gifts, gift], lastRelation: gift.relation }),
-        (n) => [{ t: "gift", item: gift }, { t: "meta", meta: metaOf(n) }],
+        () => [{ t: "gift", item: gift }],
       );
       return gift;
     },
@@ -300,23 +331,47 @@ export function useLedger(user: string | null) {
     [mutate],
   );
 
+  // 관계는 하나씩 따로 저장한다. 목록을 통째로 쓰면 다른 기기에서 더한 관계를 지워 버린다
   const addRelation = useCallback(
-    (name: string) =>
-      mutate((d) => (d.relations.includes(name) ? d : { ...d, relations: [...d.relations, name] }), (n) => [{ t: "meta", meta: metaOf(n) }]),
+    (name: string) => {
+      if (dataRef.current.relations.includes(name)) return;
+      mutate((d) => ({ ...d, relations: [...d.relations, name] }), () => [{ t: "rel", name, order: Date.now() }]);
+    },
     [mutate],
   );
 
   const removeRelation = useCallback(
-    (name: string) => mutate((d) => ({ ...d, relations: d.relations.filter((r) => r !== name) }), (n) => [{ t: "meta", meta: metaOf(n) }]),
+    (name: string) => mutate((d) => ({ ...d, relations: d.relations.filter((r) => r !== name) }), () => [{ t: "delRel", name }]),
     [mutate],
   );
+
+  /** 밀린 변경을 지금 보내 본다. 다 보냈으면 true */
+  const flushNow = useCallback(async () => {
+    await flush();
+    return pending.current.length === 0;
+  }, [flush]);
+
+  /** 로그아웃할 때 이 기기에 남은 사본과 대기열을 지운다 (공용 기기에 이름·금액이 남지 않게) */
+  const clearLocal = useCallback(() => {
+    if (!user) return;
+    pending.current = [];
+    try {
+      localStorage.removeItem(cacheKey(user));
+      localStorage.removeItem(pendingKey(user));
+    } catch {
+      /* ignore */
+    }
+  }, [user]);
 
   return {
     data,
     ready,
     saveFailed,
     loadFailed,
+    expired,
     migrated,
+    flushNow,
+    clearLocal,
     cloud: !!user,
     createEvent,
     openEvent,

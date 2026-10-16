@@ -1,6 +1,7 @@
 /* 라이브러리 없이 만드는 .xlsx — 시트 하나짜리 통합 문서를 압축 없는 zip으로 묶는다. */
 
-type Cell = string | number;
+/** 문자열·숫자, 또는 { v, bold } 로 굵게. 숫자는 항상 1,000 단위 콤마가 붙는다 */
+export type Cell = string | number | { v: string | number; bold?: boolean };
 
 const CRC = new Uint32Array(256).map((_, n) => {
   let c = n;
@@ -63,7 +64,7 @@ const col = (i: number) => {
   return s;
 };
 
-/** 첫 줄은 제목 줄. 숫자는 숫자 칸으로 들어가서 엑셀에서 바로 합계를 낼 수 있다. */
+/** 숫자는 숫자 칸(콤마 서식)으로 들어가서 엑셀에서 바로 합계를 낼 수 있다. */
 export function makeXlsx(sheetName: string, rows: Cell[][], widths: number[] = []): Blob {
   const name = esc(sheetName.replace(/[\[\]:*?/\\]/g, " ").trim().slice(0, 31) || "Sheet1");
   const cols = widths.length ? `<cols>${widths.map((w, i) => `<col min="${i + 1}" max="${i + 1}" width="${w}" customWidth="1"/>`).join("")}</cols>` : "";
@@ -72,10 +73,13 @@ export function makeXlsx(sheetName: string, rows: Cell[][], widths: number[] = [
       (r, ri) =>
         `<row r="${ri + 1}">` +
         r
-          .map((v, ci) => {
+          .map((cell, ci) => {
             const ref = `${col(ci)}${ri + 1}`;
-            if (typeof v === "number") return `<c r="${ref}"><v>${v}</v></c>`;
-            return `<c r="${ref}" t="inlineStr"><is><t xml:space="preserve">${esc(v)}</t></is></c>`;
+            const bold = typeof cell === "object" && !!cell.bold;
+            const v = typeof cell === "object" ? cell.v : cell;
+            // cellXfs: 0 기본, 1 숫자(콤마), 2 굵게, 3 굵은 숫자(콤마)
+            if (typeof v === "number") return `<c r="${ref}" s="${bold ? 3 : 1}"><v>${v}</v></c>`;
+            return `<c r="${ref}" t="inlineStr"${bold ? ' s="2"' : ""}><is><t xml:space="preserve">${esc(v)}</t></is></c>`;
           })
           .join("") +
         "</row>",
@@ -119,11 +123,16 @@ export function makeXlsx(sheetName: string, rows: Cell[][], widths: number[] = [
       name: "xl/styles.xml",
       text:
         `${xml}<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">` +
-        `<fonts count="1"><font><sz val="11"/><name val="맑은 고딕"/></font></fonts>` +
+        `<fonts count="2"><font><sz val="11"/><name val="맑은 고딕"/></font><font><b/><sz val="11"/><name val="맑은 고딕"/></font></fonts>` +
         `<fills count="2"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill></fills>` +
         `<borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders>` +
         `<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>` +
-        `<cellXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/></cellXfs>` +
+        `<cellXfs count="4">` +
+        `<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>` +
+        `<xf numFmtId="3" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/>` +
+        `<xf numFmtId="0" fontId="1" fillId="0" borderId="0" xfId="0" applyFont="1"/>` +
+        `<xf numFmtId="3" fontId="1" fillId="0" borderId="0" xfId="0" applyNumberFormat="1" applyFont="1"/>` +
+        `</cellXfs>` +
         `</styleSheet>`,
     },
     {

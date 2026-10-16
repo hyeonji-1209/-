@@ -1,5 +1,6 @@
-/** 대표 사진 data URL 상한. DynamoDB 항목 한도(400KB)와 localStorage 를 생각해 넉넉히 아래로 잡는다 */
-export const COVER_LIMIT = 300 * 1024;
+/** 대표 사진 data URL 상한. 사진은 행사 항목에 들어가 이 기기 사본·전송 대기열에도 그대로 복사되므로
+ *  localStorage(약 5MB)를 생각해 작게 잡는다. 600px 사진은 보통 40~80KB 라 대부분 첫 품질에서 통과한다 */
+export const COVER_LIMIT = 120 * 1024;
 
 /** 대표 사진을 카드 크기에 맞게 줄여 data URL로. 600px · JPEG 75% 면 보통 40~80KB 다. */
 export async function fileToCover(file: File, max = 600): Promise<string> {
@@ -20,7 +21,7 @@ export async function fileToCover(file: File, max = 600): Promise<string> {
     canvas.height = h;
     canvas.getContext("2d")!.drawImage(img, 0, 0, w, h);
     // 복잡한 사진이면 품질을 한 단계씩 낮춰 상한 아래로
-    for (const q of [0.75, 0.6, 0.45]) {
+    for (const q of [0.75, 0.6, 0.45, 0.3]) {
       const out = canvas.toDataURL("image/jpeg", q);
       if (out.length <= COVER_LIMIT) return out;
     }

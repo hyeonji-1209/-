@@ -91,7 +91,19 @@ function EventCard({ event, gifts, state, onSelect, onCover, toast }: CardProps)
     <div
       className={`card event-card ${state}${over ? " over" : ""}`}
       style={{ background: info.cover }}
+      role="button"
+      tabIndex={0}
+      aria-pressed={state === "on"}
+      aria-label={`${event.title} 행사 보기`}
       onClick={onSelect}
+      onKeyDown={(e) => {
+        // 카드 안의 "사진" 버튼에서 누른 키는 그 버튼 몫이다
+        if (e.target !== e.currentTarget) return;
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          onSelect();
+        }
+      }}
       onDragOver={(e) => {
         e.preventDefault();
         setOver(true);
@@ -131,7 +143,6 @@ function EventCard({ event, gifts, state, onSelect, onCover, toast }: CardProps)
         </span>
         {gifts.length > 0 && <span className="card-sum num">{`${gifts.length}명 · ${money(total)}`}</span>}
       </div>
-      {state === "on" && <span className="sr-only">선택됨</span>}
     </div>
   );
 }

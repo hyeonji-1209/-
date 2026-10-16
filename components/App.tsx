@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useKeyboardOpen } from "@/lib/keyboard";
 import { useLedger } from "@/lib/ledger";
 import EventCards from "./EventCards";
 import EventModal from "./EventModal";
@@ -22,6 +23,7 @@ export default function App({ user, username, nickname, onSignOut }: Props) {
   const ledger = useLedger(user);
   const toast = useToast();
   const [modal, setModal] = useState<Modal>(null);
+  const keyboard = useKeyboardOpen();
   const [justCreated, setJustCreated] = useState<string | null>(null);
 
   const { events, gifts, currentEventId } = ledger.data;
@@ -31,6 +33,15 @@ export default function App({ user, username, nickname, onSignOut }: Props) {
     if (ledger.migrated) toast.show(`이 기기에 있던 기록 ${ledger.migrated}건을 계정으로 옮겼어요.`);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ledger.migrated]);
+
+  /** 밀린 변경을 먼저 보내 보고, 그래도 남으면 물어본 뒤 이 기기의 사본까지 지우고 나간다 */
+  async function signOut() {
+    if (!onSignOut) return;
+    const sent = await ledger.flushNow();
+    if (!sent && !window.confirm("아직 계정에 저장되지 않은 기록이 있어요. 지금 로그아웃하면 그 기록은 사라져요. 그래도 로그아웃할까요?")) return;
+    ledger.clearLocal();
+    onSignOut();
+  }
 
   if (!ledger.ready) return <div className="app" />;
 
@@ -42,19 +53,19 @@ export default function App({ user, username, nickname, onSignOut }: Props) {
             <img className="brand-mark" src="/brand.png" alt="" />
             <span className="brand-name">마음장부</span>
           </span>
-          {/* 폰에서는 글자 대신 아이콘만 보인다 (.pill-text 숨김) */}
-          <button type="button" className={`pill${current ? "" : " active"}`} onClick={() => ledger.openEvent(null)} aria-label="전체 기록">
+          {/* 폰에서는 이 둘이 아래 고정 바로 내려간다 (.topnav .pill.nav-main 숨김) */}
+          <button type="button" className={`pill nav-main${current ? "" : " active"}`} onClick={() => ledger.openEvent(null)} aria-label="전체 기록">
             <ListIcon />
             <span className="pill-text">전체 기록</span>
           </button>
-          <button type="button" className="pill solid" onClick={() => setModal("new")} aria-label="새 행사">
+          <button type="button" className="pill solid nav-main" onClick={() => setModal("new")} aria-label="새 행사">
             <PlusIcon />
             <span className="pill-text">+ 새 행사</span>
           </button>
           {onSignOut && (
             <span className="who">
               {who && <span className="who-name">{who}님</span>}
-              <button type="button" className="pill ghost" onClick={onSignOut} title={username ?? undefined} aria-label="로그아웃">
+              <button type="button" className="pill ghost" onClick={signOut} title={username ?? undefined} aria-label="로그아웃">
                 <ExitIcon />
                 <span className="pill-text">로그아웃</span>
               </button>
@@ -64,7 +75,15 @@ export default function App({ user, username, nickname, onSignOut }: Props) {
       </nav>
 
       {
-        (ledger.saveFailed || ledger.loadFailed) && (
+        ledger.expired && onSignOut ? (
+          <div className="save-error" role="alert">
+            로그인이 만료됐어요. 다시 로그인하면 밀린 기록도 저장돼요.{" "}
+            {/* 사본·대기열은 지우지 않는다 — 같은 계정으로 다시 들어오면 이어서 보낸다 */}
+            <button type="button" className="link" onClick={onSignOut}>
+              다시 로그인
+            </button>
+          </div>
+        ) : (ledger.saveFailed || ledger.loadFailed) && (
           <div className="save-error" role="alert">
             {!ledger.cloud
               ? "이 브라우저에 저장하지 못하고 있어요. 시크릿 모드라면 일반 창에서 열어 주세요."
@@ -109,6 +128,18 @@ export default function App({ user, username, nickname, onSignOut }: Props) {
       </section>
 
       <LedgerPanel ledger={ledger} event={current} focusName={!!current && justCreated === current.id} onEdit={() => setModal("edit")} toast={toast.show} />
+
+      {/* 폰: 아래 고정 바. 키패드가 올라오면 숨긴다 */}
+      <nav className={`bottombar${keyboard ? " hidden" : ""}`} aria-label="주요 메뉴">
+        <button type="button" className={current ? "" : "active"} onClick={() => ledger.openEvent(null)}>
+          <ListIcon />
+          <span>전체 기록</span>
+        </button>
+        <button type="button" className="solid" onClick={() => setModal("new")}>
+          <PlusIcon />
+          <span>새 행사</span>
+        </button>
+      </nav>
 
       <footer className="foot">
         {ledger.cloud ? `${who ?? "내"} 계정에 저장돼요` : "이 기기에만 저장돼요"} · 기록은 ‘엑셀로 다운받기’로 꺼낼 수 있어요

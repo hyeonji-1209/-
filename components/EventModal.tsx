@@ -2,6 +2,7 @@
 
 import { useRef, useState } from "react";
 import { EVENT_TYPES, typeInfo, type EventType } from "@/lib/events";
+import { TIME_OPTIONS, clockLabel, dotDate, maskDate, parseDate, today } from "@/lib/format";
 import { fileToCover } from "@/lib/image";
 import type { EventDetails, LedgerEvent } from "@/lib/ledger";
 import Sheet from "./Sheet";
@@ -18,18 +19,20 @@ interface Props {
 export default function EventModal({ event, giftCount = 0, onClose, onSave, onDelete }: Props) {
   const [type, setType] = useState<EventType>(event?.type ?? "wedding");
   const [title, setTitle] = useState(event?.title ?? "");
-  const [when, setWhen] = useState(event ? `${event.date}${event.time ? `T${event.time}` : ""}` : "");
+  const [date, setDate] = useState(event ? dotDate(event.date) : "");
+  const [time, setTime] = useState(event?.time ?? "");
   const [place, setPlace] = useState(event?.place ?? "");
   const [cover, setCover] = useState(event?.cover);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
   const editing = !!event;
-  const ready = title.trim().length > 0;
+  const iso = date ? parseDate(date) : "";
+  const dateBad = date.length > 0 && iso === null;
+  const ready = title.trim().length > 0 && !dateBad;
 
   function submit() {
     if (!ready) return;
-    const [date, time] = when.split("T");
-    onSave({ type, title: title.trim(), date, time: time ?? "", place: place.trim(), cover });
+    onSave({ type, title: title.trim(), date: iso || today(), time, place: place.trim(), cover });
   }
 
   return (
@@ -57,14 +60,39 @@ export default function EventModal({ event, giftCount = 0, onClose, onSave, onDe
 
         <div className="field-row">
           <label className="field">
-            <span>일시</span>
-            <input id="event-when" className="line-input" type="datetime-local" value={when} onChange={(e) => setWhen(e.target.value)} />
+            <span>날짜 {dateBad && <em className="field-err">날짜를 다시 확인해 주세요</em>}</span>
+            <span className="with-btn">
+              <input
+                id="event-date"
+                className="line-input num"
+                inputMode="numeric"
+                placeholder="2026.11.07"
+                value={date}
+                onChange={(e) => setDate(maskDate(e.target.value))}
+                aria-invalid={dateBad || undefined}
+              />
+              <button type="button" className="mini" onClick={() => setDate(dotDate(today()))}>
+                오늘
+              </button>
+            </span>
           </label>
           <label className="field">
-            <span>장소</span>
-            <input id="event-place" className="line-input" value={place} onChange={(e) => setPlace(e.target.value)} placeholder="예: 서울 강남" />
+            <span>시간 (선택)</span>
+            <select id="event-time" className="line-input" value={time} onChange={(e) => setTime(e.target.value)}>
+              <option value="">시간 없음</option>
+              {time && !TIME_OPTIONS.includes(time) && <option value={time}>{clockLabel(time)}</option>}
+              {TIME_OPTIONS.map((t) => (
+                <option key={t} value={t}>
+                  {clockLabel(t)}
+                </option>
+              ))}
+            </select>
           </label>
         </div>
+        <label className="field">
+          <span>장소</span>
+          <input id="event-place" className="line-input" value={place} onChange={(e) => setPlace(e.target.value)} placeholder="예: 서울 강남" />
+        </label>
 
         <div className="event-form-foot">
           {editing && onDelete ? (

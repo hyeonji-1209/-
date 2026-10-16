@@ -14,6 +14,8 @@
 npm install
 npm run dev     # http://localhost:3000
 npm run build   # out/ 에 정적 사이트 생성
+npm test        # lib 단위 테스트 (Node 22 내장 러너)
+npm run typecheck
 ```
 
 ## 로그인 + DB (개인 AWS 계정, 서울 리전)
@@ -57,15 +59,15 @@ npm run build   # out/ 에 정적 사이트 생성
 
 ## 배포 (alicework.kr)
 
-정적 파일을 S3 에 두고 CloudFront 가 `https://alicework.kr` 로 서빙한다. 스택은 `infra/site.yaml` (인증서 때문에 us-east-1).
+정적 파일을 S3 에 두고 CloudFront 가 `https://heartledger.alicework.kr` 로 서빙한다. 스택은 `infra/site.yaml` (인증서 때문에 us-east-1).
 
 ```bash
 ./infra/site.sh          # 1단계: 네임서버 4개 출력 → 가비아 "네임서버 설정"에 입력
-./infra/site.sh ready    # 2단계: 네임서버 전파 뒤 실행. 인증서 발급 + 도메인 연결
+./infra/site.sh ready    # 2단계: 네임서버 전파 뒤 실행. 인증서 발급 + 도메인 연결 (이미 끝남)
 ./infra/publish.sh       # 빌드해서 올리기 (코드 바꿀 때마다)
 ```
 
 도메인이 연결되면 로그인 콜백 주소도 추가한다:
 ```bash
-./infra/deploy.sh "CallbackUrls=http://localhost:3000/,https://alicework.kr/" "LogoutUrls=http://localhost:3000/,https://alicework.kr/"
+./infra/deploy.sh "CallbackUrls=http://localhost:3000/,https://heartledger.alicework.kr/" "LogoutUrls=http://localhost:3000/,https://heartledger.alicework.kr/"
 ```
