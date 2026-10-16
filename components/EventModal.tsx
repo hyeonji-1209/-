@@ -10,20 +10,18 @@ import Sheet from "./Sheet";
 interface Props {
   /** 고칠 행사. 없으면 새 행사 */
   event?: LedgerEvent;
-  giftCount?: number;
   onClose: () => void;
   onSave: (details: EventDetails) => void;
   onDelete?: () => void;
 }
 
-export default function EventModal({ event, giftCount = 0, onClose, onSave, onDelete }: Props) {
+export default function EventModal({ event, onClose, onSave, onDelete }: Props) {
   const [type, setType] = useState<EventType>(event?.type ?? "wedding");
   const [title, setTitle] = useState(event?.title ?? "");
   const [date, setDate] = useState(event ? dotDate(event.date) : "");
   const [time, setTime] = useState(event?.time ?? "");
   const [place, setPlace] = useState(event?.place ?? "");
   const [cover, setCover] = useState(event?.cover);
-  const [confirmDelete, setConfirmDelete] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
   const editing = !!event;
   const iso = date ? parseDate(date) : "";
@@ -113,12 +111,9 @@ export default function EventModal({ event, giftCount = 0, onClose, onSave, onDe
 
         <div className="event-form-foot">
           {editing && onDelete ? (
-            <button
-              type="button"
-              className={`link-danger${confirmDelete ? " confirm" : ""}`}
-              onClick={() => (confirmDelete ? onDelete() : setConfirmDelete(true))}
-            >
-              {confirmDelete ? (giftCount ? `기록 ${giftCount}건까지 모두 삭제` : "정말 삭제") : "행사 삭제"}
+            // 지우기 전에 확인 창이 한 번 더 뜬다
+            <button type="button" className="link-danger" onClick={onDelete}>
+              행사 삭제
             </button>
           ) : (
             <span />

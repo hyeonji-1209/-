@@ -2,12 +2,14 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useLedger } from "@/lib/ledger";
+import { DeleteConfirm, EventMenu } from "./EventActions";
 import EventModal from "./EventModal";
 import Home from "./Home";
 import LedgerPanel from "./LedgerPanel";
 import { useToast } from "./Toast";
 
-type Modal = null | "new" | "edit";
+/** 떠 있는 창: 새 행사 · 행사 수정 · 꾹 누른 메뉴 · 삭제 확인 */
+type Modal = null | { kind: "new" } | { kind: "edit" | "menu" | "delete"; id: string };
 
 /** 첫 화면 · 행사 하나 · 전체 기록. 주소(?e=행사ID, ?v=all)에도 두어 폰의 뒤로 가기·새로고침이 자연스럽다 */
 type View = { page: "home" } | { page: "event"; id: string } | { page: "all" };
@@ -41,6 +43,8 @@ export default function App({ user, username, nickname, onSignOut }: Props) {
 
   const { events, gifts } = ledger.data;
   const current = view.page === "event" ? (events.find((e) => e.id === view.id) ?? null) : null;
+  const target = modal && modal.kind !== "new" ? (events.find((e) => e.id === modal.id) ?? null) : null;
+  const giftsOf = (id: string) => gifts.filter((g) => g.eventId === id);
 
   useEffect(() => {
     const onPop = () => setView(readView());
@@ -77,6 +81,23 @@ export default function App({ user, username, nickname, onSignOut }: Props) {
     if (!sent && !window.confirm("아직 계정에 저장되지 않은 기록이 있어요. 지금 로그아웃하면 그 기록은 사라져요. 그래도 로그아웃할까요?")) return;
     ledger.clearLocal();
     onSignOut();
+  }
+
+  function openEvent(id: string) {
+    setJustCreated(null);
+    setModal(null);
+    go({ page: "event", id });
+  }
+
+  /** 지우고, 바로 뒤엔 기록까지 되살릴 수 있게 둔다. 그 행사 화면에 있었으면 첫 화면으로 */
+  function deleteEvent(e: { id: string; title: string }) {
+    const event = events.find((x) => x.id === e.id);
+    if (!event) return;
+    const its = giftsOf(e.id);
+    ledger.deleteEvent(e.id);
+    setModal(null);
+    toast.show(`${event.title} 행사를 지웠어요.`, { label: "되돌리기", run: () => ledger.restoreEvent(event, its) });
+    if (view.page === "event" && view.id === e.id) back();
   }
 
   if (!ledger.ready) return <div className="app" />;
@@ -136,12 +157,12 @@ export default function App({ user, username, nickname, onSignOut }: Props) {
         <Home
           events={events}
           gifts={gifts}
-          onOpen={(id) => {
-            setJustCreated(null);
-            go({ page: "event", id });
-          }}
+          onOpen={openEvent}
+          onEdit={(id) => setModal({ kind: "edit", id })}
+          onDelete={(id) => setModal({ kind: "delete", id })}
+          onMenu={(id) => setModal({ kind: "menu", id })}
           onAll={() => go({ page: "all" })}
-          onNew={() => setModal("new")}
+          onNew={() => setModal({ kind: "new" })}
           onCover={(id, cover) => ledger.updateEvent(id, { cover })}
           toast={toast.show}
         />
@@ -151,39 +172,45 @@ export default function App({ user, username, nickname, onSignOut }: Props) {
           ledger={ledger}
           event={current}
           focusName={!!current && justCreated === current.id}
-          onEdit={() => setModal("edit")}
+          onEdit={() => current && setModal({ kind: "edit", id: current.id })}
           toast={toast.show}
         />
       )}
 
-      {modal === "new" && (
+      {modal?.kind === "new" && (
         <EventModal
           onClose={() => setModal(null)}
           onSave={(details) => {
             const e = ledger.createEvent(details);
-            setJustCreated(e.id);
             setModal(null);
             go({ page: "event", id: e.id });
+            setJustCreated(e.id);
           }}
         />
       )}
-      {modal === "edit" && current && (
+      {modal?.kind === "edit" && target && (
         <EventModal
-          event={current}
-          giftCount={gifts.filter((g) => g.eventId === current.id).length}
+          event={target}
           onClose={() => setModal(null)}
           onSave={(details) => {
-            ledger.updateEvent(current.id, details);
+            ledger.updateEvent(target.id, details);
             setModal(null);
             toast.show("행사 정보를 고쳤어요.");
           }}
-          onDelete={() => {
-            ledger.deleteEvent(current.id);
-            setModal(null);
-            toast.show(`${current.title} 행사를 지웠어요.`);
-            back();
-          }}
+          onDelete={() => setModal({ kind: "delete", id: target.id })}
         />
+      )}
+      {modal?.kind === "menu" && target && (
+        <EventMenu
+          event={target}
+          onOpen={() => openEvent(target.id)}
+          onEdit={() => setModal({ kind: "edit", id: target.id })}
+          onDelete={() => setModal({ kind: "delete", id: target.id })}
+          onClose={() => setModal(null)}
+        />
+      )}
+      {modal?.kind === "delete" && target && (
+        <DeleteConfirm event={target} giftCount={giftsOf(target.id).length} onConfirm={() => deleteEvent(target)} onClose={() => setModal(null)} />
       )}
       {toast.node}
     </div>

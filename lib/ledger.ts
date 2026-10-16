@@ -293,6 +293,16 @@ export function useLedger(user: string | null) {
     [mutate],
   );
 
+  /** 지운 행사를 기록까지 그대로 되살린다 (삭제 직후 "되돌리기") */
+  const restoreEvent = useCallback(
+    (event: LedgerEvent, eventGifts: Gift[]) =>
+      mutate(
+        (d) => (d.events.some((e) => e.id === event.id) ? d : { ...d, events: [...d.events, event], gifts: [...d.gifts, ...eventGifts] }),
+        () => [{ t: "event", item: event }, ...eventGifts.map((g): cloud.Op => ({ t: "gift", item: g }))],
+      ),
+    [mutate],
+  );
+
   const addGift = useCallback(
     (eventId: string, details: GiftDetails) => {
       const gift: Gift = { id: newId(), eventId, ...details, createdAt: Date.now() };
@@ -377,6 +387,7 @@ export function useLedger(user: string | null) {
     openEvent,
     updateEvent,
     deleteEvent,
+    restoreEvent,
     addGift,
     updateGift,
     removeGift,
